@@ -1,0 +1,29 @@
+# 开屏广告缓存锁定规则：包名<TAB或空格>相对 /data/data/<包名>/ 的路径；@sdcard: 前缀 = 相对 /data/media/0/Android/data/<包名>/
+# 处理方式（v0.2.24，参考 Adguard-Home-For-Magisk-Mod 的 NoAdsService.sh / lingeringsound 去广告模块）：
+#   目录 → 清空后 chattr +i（空且不可变，App 写不进素材也删不掉）；文件 → 清空后 chattr +i。
+#   只锁上级目录已存在的路径；App 没装 / 目录还没生成就跳过，下次开机 / 改配置时再试。
+# 解锁：xguard run shield unlock <包名>（chattr -i）
+# 以下条目摘自 liuzq2002/Adguard-Home-For-Magisk-Mod scripts/NoAdsService.sh（commit 0a0717ba），
+# 只保留名字明确是开屏 / 广告缓存的路径；会影响资源更新、配置文件（shared_prefs）、图片缓存的条目没有收录。
+# App 更新后路径可能变化：用 `xguard run shield discover` 扫描候选，再在 App 里加自定义规则。
+tv.danmaku.bili                 files/splash2
+tv.danmaku.bili                 files/splash_top_view
+com.zhihu.android               files/ad
+com.autonavi.minimap            files/splash
+com.taobao.idlefish             @sdcard:files/splash_ad_assets
+com.taobao.idlefish             @sdcard:files/ad
+com.tencent.mobileqq            @sdcard:files/vas_ad
+com.netease.cloudmusic          @sdcard:cache/Ad
+cn.kuwo.player                  @sdcard:files/KuwoMusic/.screenad
+cn.kuwo.player                  @sdcard:files/KuwoMusic/.ad
+cn.damai                        files/ad_dir
+cn.missevan                     cache/splash
+com.sf.activity                 files/openScreenADsImg
+com.anjuke.android.app          cache/splash_ad
+com.mihoyo.hyperion             @sdcard:cache/splash
+com.umetrip.android.msky.app    files/ad
+ctrip.android.view              @sdcard:cache/CTADCache
+ctrip.android.view              files/CTAD
+com.hexin.plat.android          cache/splash_images
+com.cn21.ecloud                 files/ecloud_current_screenad.obj
+com.xiaomi.smarthome            files/sh_ads_file

@@ -1,0 +1,21 @@
+# XGuard「永不拦截」（v0.5.12，青鸟 FCM 推送）：这些域名任何规则源、用户自定义拦截都不会写进 hosts。
+# 拦了它们 Google FCM 推送整条断（GMS 连不上 mtalk / 拿不到 token），所以比用户「拦截」优先。精确域名，不是通配。
+# 来源：Firebase「Configure your Network for FCM」https://firebase.google.com/docs/cloud-messaging/network-configuration
+#       （mtalk / mtalk4 / alt1–alt8-mtalk.google.com、android.apis.google.com、device-provisioning.googleapis.com、firebaseinstallations.googleapis.com）
+#       + microG McsService SERVICE_HOST=mtalk.google.com + FCM 注册 / 令牌接口（fcm.googleapis.com、fcmtoken.googleapis.com、android.clients.google.com）
+mtalk.google.com
+mtalk4.google.com
+alt1-mtalk.google.com
+alt2-mtalk.google.com
+alt3-mtalk.google.com
+alt4-mtalk.google.com
+alt5-mtalk.google.com
+alt6-mtalk.google.com
+alt7-mtalk.google.com
+alt8-mtalk.google.com
+android.apis.google.com
+device-provisioning.googleapis.com
+firebaseinstallations.googleapis.com
+fcm.googleapis.com
+fcmtoken.googleapis.com
+android.clients.google.com

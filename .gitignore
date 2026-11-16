@@ -1,0 +1,36 @@
+# Local credentials and signing material
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.pem
+*.p12
+*.pfx
+*.key
+local.properties
+
+# Build outputs and release staging
+/dist/
+*.zip
+*.apk.idsig
+*.class
+*.dex
+/app/xguard.apk
+/no-root/*.apk
+/XGuard-*.apk
+/build/
+**/.gradle/
+**/build/
+
+# Local tools, device captures, and editor state
+/.xguard-publish/
+**/device-check/
+**/rendered/
+**/rendered2/
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db

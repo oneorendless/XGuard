@@ -1,0 +1,66 @@
+<!doctype html><html lang="zh-CN"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="color-scheme" content="light dark">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; script-src 'self'; style-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'">
+<title>XGuard</title><link rel="icon" href="logo.svg"><link rel="stylesheet" href="theme.css"><link rel="stylesheet" href="style.css"><script src="glass.js" defer></script><script src="app.js" defer></script></head><body>
+<svg width="0" height="0" class="sprites" aria-hidden="true"><defs>
+<symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10H5V10m4 10v-7h6v7"/></symbol>
+<symbol id="i-activity" viewBox="0 0 24 24"><path d="M2 12h5l3-8 4 16 3-8h5"/></symbol>
+<symbol id="i-rules" viewBox="0 0 24 24"><path d="M5 4h14v16H5zM9 8h6m-6 4h6m-6 4h4"/></symbol>
+<symbol id="i-splash" viewBox="0 0 24 24"><path d="M7 3h10v18H7zM10 17h4m-3-6 3-4-1 5h2l-4 4 1-5z"/></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="3"/><circle cx="15" cy="17" r="3"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5m4-4a8 8 0 1 0 0 9"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 4-4 7-8 9-4-2-8-5-8-9V6zM8 12l3 3 5-6"/></symbol>
+</defs></svg>
+<div class="app-shell"><header class="brand"><img src="logo.svg" alt="" width="38" height="38"><div class="brand-wordmark"><span class="brand-name">XGuard</span><small>QUIET BY DESIGN</small></div><span id="header-version" class="version-tag">0.8.3</span><button id="refresh" class="icon-button glass" aria-label="刷新状态"><svg><use href="#i-refresh"/></svg></button></header><main>
+<section id="home" class="page">
+<div class="page-heading"><p class="eyebrow"><span class="eyebrow-dot"></span> A LITTLE LESS NOISE</p><h1>清净，自在连接。</h1><p id="connection" class="muted" role="status">正在连接模块…</p></div>
+<article class="protection-card"><div class="protection-kicker"><span>网络防护</span><span class="protection-badge">AD −</span></div><div class="protection-top"><span class="shield-icon"><svg><use href="#i-shield"/></svg></span><div class="protection-copy"><h2 id="protection-title">正在读取</h2><p id="mode">连接服务后显示防护状态</p></div><button id="toggle" class="switch" role="switch" aria-checked="false" aria-label="XGuard 防护开关" disabled></button></div><p id="summary" class="protection-summary">等待模块响应</p></article>
+<p id="warning" class="notice" hidden></p>
+<div class="metrics"><article><span>规则域名</span><strong id="rule-count">—</strong><small>当前加载</small></article><article><span>开屏防护</span><strong id="locked-count">—</strong><small>已锁定应用</small></article><article><span>规则来源</span><strong id="source-count">—</strong><small>已启用</small></article></div>
+<div class="section-heading"><h2>常用操作</h2><span class="subtle">QUICK ACTIONS</span></div><div class="quick-actions"><button id="update"><svg><use href="#i-refresh"/></svg><span>更新规则<small>同步最新域名列表</small></span><svg class="chevron"><use href="#i-arrow"/></svg></button><button id="test"><svg><use href="#i-shield"/></svg><span>检查防护<small>验证规则是否生效</small></span><svg class="chevron"><use href="#i-arrow"/></svg></button></div>
+<p id="update-info" class="muted micro"></p>
+<div class="section-heading"><h2>域名观察</h2><span class="subtle">NETWORK ACTIVITY</span></div><button id="activity-open" class="activity-entry"><svg><use href="#i-activity"/></svg><span><b>实时查看连接域名</b><small id="home-monitor-status">查看 DNS / TLS 域名，按需封禁</small></span><svg class="chevron"><use href="#i-arrow"/></svg></button>
+<div class="home-note"><span class="quiet-line"></span><p>少一点干扰，多一点自在。<small>Designed by Xuan</small></p><span class="quiet-line"></span></div></section>
+<section id="activity" class="page" hidden>
+<div class="page-heading"><p class="eyebrow">NETWORK ACTIVITY</p><h1>实时域名</h1><p class="muted">看清连接，让每一次放行都有依据。</p></div>
+<article class="monitor-card"><div><span id="monitor-dot" class="status-dot"></span><b id="monitor-state">正在读取采集状态</b><small id="activity-updated">—</small></div><button id="monitor-toggle" class="secondary">暂停采集</button></article><p id="monitor-detail" class="muted micro" role="status">采集明文 DNS 与 TLS 握手中的域名。</p>
+<div class="activity-toolbar"><input id="activity-search" type="search" placeholder="搜索连接域名" aria-label="搜索连接域名" autocomplete="off"><button id="activity-refresh" class="icon-button glass" aria-label="刷新域名"><svg><use href="#i-refresh"/></svg></button></div>
+<div class="activity-tabs" role="tablist" aria-label="域名筛选"><button data-filter="all" aria-selected="true">全部 <span id="activity-total">0</span></button><button data-filter="dns" aria-selected="false">DNS</button><button data-filter="tls" aria-selected="false">TLS</button><button data-filter="blocked" aria-selected="false">规则命中</button><button id="activity-clear" class="text-button">清空</button></div><div id="activity-list" class="activity-feed" aria-live="polite"></div>
+<p class="muted micro coverage-note">仅显示实际观察到的明文 DNS / 可见 TLS SNI。加密 DNS、ECH、QUIC 和缓存命中可能没有域名；被 hosts 提前拦截的请求也不会进入网络采集。</p>
+<details class="editor-details" open><summary>手动查询与域名规则</summary><div class="domain-console"><label for="domain">输入域名</label><input id="domain" placeholder="ads.example.com" autocomplete="off" autocapitalize="off" spellcheck="false"><div class="actions"><button id="query-domain">查询</button><button id="allow-domain">放行</button><button id="block-domain" class="primary">封禁</button></div><p id="domain-result" class="muted micro" role="status"></p></div><div id="domains" class="list"></div></details></section>
+<section id="sources" class="page" hidden><div class="page-heading"><p class="eyebrow">RULES</p><h1>规则，按需选择。</h1><p class="muted">内置基线离线可用，切换来源即可重建规则。</p></div>
+<div class="section-heading"><h2>订阅来源</h2><button id="reset-sources" class="text-button">恢复默认</button></div><div id="source-list" class="card list"></div>
+<h2>自动更新</h2><article class="card"><label for="interval">更新间隔</label><select id="interval"><option value="0">仅手动</option><option value="6">每 6 小时</option><option value="12">每 12 小时</option><option value="24">每 24 小时</option><option value="48">每 48 小时</option><option value="168">每周</option></select><p id="auto-info" class="muted micro"></p></article>
+<h2>自定义来源</h2><article class="card"><label for="source-url">hosts / 域名列表地址</label><input id="source-url" type="url" placeholder="https://example.com/hosts" autocapitalize="off" spellcheck="false"><button id="add-source" class="primary full">添加来源</button></article><div id="custom-sources" class="card list"></div></section>
+<section id="splash" class="page" hidden><div class="page-heading"><p class="eyebrow">SPLASH CONTROL</p><h1>打开应用，少一点等待。</h1><p class="muted">管理开屏广告缓存，异常时可单独解锁。</p></div><input id="filter-apps" placeholder="搜索应用包名" aria-label="筛选开屏应用"><div id="splash-hits" class="card list"></div>
+<details class="editor-details"><summary>自定义开屏规则</summary><div class="card"><label for="package">应用包名</label><input id="package" placeholder="com.example.app" autocapitalize="off" spellcheck="false"><label for="rule-path">缓存相对路径</label><input id="rule-path" placeholder="files/splash 或 @sdcard:files/ad" autocapitalize="off" spellcheck="false"><button id="add-rule" class="primary full">添加并锁定</button></div><div id="user-rules" class="list"></div></details>
+<h2>发现缓存</h2><article class="card"><p class="muted micro">扫描只列出候选目录，加入规则后才会锁定。可填包名缩小范围。</p><button id="discover" class="full">扫描候选</button><div id="candidates" class="list"></div></article></section>
+<section id="settings" class="page" hidden><div class="page-heading"><p class="eyebrow">SETTINGS</p><h1>保持简单。</h1><p class="muted">调整防护，查看运行状态。</p></div>
+<article class="card list"><label class="row" for="mount-mode"><span><b>挂载方式</b><small>推荐自动选择</small></span><select id="mount-mode"><option value="auto">自动</option><option value="bind">Bind</option><option value="overlay">Overlay</option><option value="zn">ZN</option><option value="hfr">HFR</option></select></label><label class="row" for="guard"><span><b>HTTPDNS IP 拦截</b><small>默认关闭，开启可能影响登录与支付</small></span><input id="guard" type="checkbox" role="switch"></label><label class="row" for="proxy-yield"><span><b>代理接管 hosts</b><small>检测到代理服务时，由代理负责域名防护</small></span><input id="proxy-yield" type="checkbox" role="switch"></label><label class="row" for="hide"><span><b>适配模块卸载列表</b><small>对已设置卸载模块的应用隐藏规则</small></span><input id="hide" type="checkbox" role="switch"></label><label class="row" for="max-rules"><span><b>规则上限</b><small>10,000 至 1,000,000</small></span><input id="max-rules" type="number" min="10000" max="1000000" step="10000"></label><div class="card-bottom"><button id="save-max" class="secondary">保存规则上限</button></div></article>
+<h2>诊断与恢复</h2><article class="card"><p id="runtime" class="muted micro"></p><div class="actions"><button id="logs">查看日志</button><button id="safe-mode">安全模式</button></div><p class="muted micro">安全模式切换后重启生效。</p></article><pre id="log-output" hidden></pre>
+<article class="about"><img src="logo.svg" width="56" height="56" alt="XGuard 去广告标志"><h2>XGuard <span id="version">0.8.3</span></h2><p>作者 Xuan</p><small>基于惜故里丶的原始作品二次创作<br>保留原作者署名与开源许可</small><details class="credits"><summary>开源致谢</summary><p>玻璃折射与高光算法改编自 <b>PrismalAGSL</b><br>© 2026 Saurav Sajeev · MIT License</p><button id="show-license" class="text-button">查看完整许可</button></details></article></section>
+</main><nav class="bottom-nav" aria-label="主导航"><span class="nav-surface glass" aria-hidden="true"></span><span class="nav-lens glass" aria-hidden="true"></span><button data-tab="home" aria-selected="true"><svg><use href="#i-home"/></svg><span>概览</span></button><button data-tab="activity" aria-selected="false"><svg><use href="#i-activity"/></svg><span>域名</span></button><button data-tab="sources" aria-selected="false"><svg><use href="#i-rules"/></svg><span>规则</span></button><button data-tab="splash" aria-selected="false"><svg><use href="#i-splash"/></svg><span>开屏</span></button><button data-tab="settings" aria-selected="false"><svg><use href="#i-settings"/></svg><span>设置</span></button></nav></div>
+<div id="toast" role="status" hidden></div><dialog id="confirm-dialog" class="glass"><h2 id="confirm-title"></h2><p id="confirm-message"></p><div class="actions"><button id="confirm-no">取消</button><button id="confirm-yes" class="primary">确定</button></div></dialog><dialog id="license-dialog" class="glass"><h2>PrismalAGSL · MIT License</h2><pre>MIT License
+
+Copyright (c) 2026 Saurav Sajeev
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the &quot;Software&quot;), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED &quot;AS IS&quot;, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+</pre><form method="dialog"><button class="primary full">关闭</button></form></dialog><dialog id="root-dialog" class="glass" aria-labelledby="root-title"><div class="root-mark"><svg><use href="#i-shield"/></svg></div><h2 id="root-title">允许 XGuard 使用 Root</h2><p>应用防护规则、管理开屏广告与查看连接域名，需要 Root 权限。</p><p>点击下方按钮后，请在 Root 管理器的授权窗口中选择「允许」。</p><p id="root-status" class="root-status micro" role="status"></p><div class="actions"><button id="root-later">稍后</button><button id="root-authorize" class="primary">授权并连接</button></div></dialog>
+<dialog id="check-dialog" class="glass" aria-labelledby="check-title"><div class="dialog-heading"><h2 id="check-title">防护检查</h2><form method="dialog"><button class="icon-button" aria-label="关闭检查结果">×</button></form></div><p id="check-state" role="status">正在检查防护…</p><details id="check-details"><summary>查看详细诊断</summary><pre id="test-result" hidden></pre></details><form method="dialog"><button class="primary full">完成</button></form></dialog></body></html>

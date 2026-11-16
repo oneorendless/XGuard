@@ -1,0 +1,15 @@
+* text=auto eol=lf
+*.sh text eol=lf
+module/system/bin/xguard text eol=lf
+module/META-INF/com/google/android/update-binary text eol=lf
+module/META-INF/com/google/android/updater-script text eol=lf
+*.go text eol=lf
+go.mod text eol=lf
+*.md text eol=lf
+*.list text eol=lf
+*.prop text eol=lf
+*.ps1 text eol=crlf
+*.apk binary
+*.zip binary
+*.png binary
+module/bin/*/xguard-monitor binary

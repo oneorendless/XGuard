@@ -1,0 +1,87 @@
+# XGuard内置放行（随模块更新）：防止规则源误杀登录 / 支付 / 聊天 / 系统联网检测。
+# 只写精确域名（不写 *.qq.com 这种整域放行，否则 mi.gdt.qq.com 之类的广告也会被放出来）。
+# 用户自己的「拦截」优先于这里；用户的「放行」在 $XG_DATA/shield/allow。
+# 来源：2026-10 对 anti-AD / GOODBYEADS / AdRules / Hagezi / 1Hosts 合并结果的人工排查 + GOODBYEADS allow.txt 中的国内条目。
+# ---- 微信 / QQ：长连接、短链、小游戏、资源 ----
+weixin.qq.com
+long.weixin.qq.com
+short.weixin.qq.com
+szlong.weixin.qq.com
+szshort.weixin.qq.com
+szextshort.weixin.qq.com
+minorshort.weixin.qq.com
+mp.weixin.qq.com
+open.weixin.qq.com
+api.weixin.qq.com
+pay.weixin.qq.com
+game.weixin.qq.com
+res.wx.qq.com
+wx.qlogo.cn
+mmbiz.qpic.cn
+mmbiz.qlogo.cn
+ssl.ptlogin2.qq.com
+xui.ptlogin2.qq.com
+graph.qq.com
+cmshow.gtimg.cn
+# ---- 支付宝 / 淘宝 / 京东：网关、登录、商品页、风控 ----
+mobilegw.alipay.com
+mclient.alipay.com
+render.alipay.com
+gw.alipayobjects.com
+login.taobao.com
+detail.taobao.com
+h5api.m.taobao.com
+acs.m.taobao.com
+ip.taobao.com
+s.click.taobao.com
+api.m.jd.com
+wl.jd.com
+mapi.m.jd.com
+janapi.jd.com
+img2.360buyimg.com
+amdc.alipay.com
+fp-it.fengkongcloud.com
+# ---- 银联 / 银行 ----
+unionpay.com
+95516.com
+# ---- B 站 / 百度 ----
+passport.bilibili.com
+api.bilibili.com
+miniapp.bilibili.com
+share.baidu.com
+# ---- ColorOS / OPPO / 一加、小米、华为：系统联网检测与系统功能 ----
+conn1.oppomobile.com
+conn2.oppomobile.com
+smartcard.apps.coloros.com
+api.open.oppomobile.com
+connect.rom.miui.com
+connectivitycheck.platform.hicloud.com
+connectivitycheck.gstatic.com
+connectivitycheck.android.com
+# ---- 推送 / 公共 CDN / 规则镜像本身 ----
+jpush.cn
+bootcss.com
+cdn.bootcss.com
+howsmyssl.com
+gcore.jsdelivr.net
+fastly.jsdelivr.net
+cdn.jsdelivr.net
+testingcf.jsdelivr.net
+raw.githubusercontent.com
+ghfast.top
+gh-proxy.com
+anti-ad.net
+adrules.top
+adaway.org
+# ---- v0.2.27：京粉 / 京东联盟（京粉打开商品、转链依赖 Kepler / 联盟跳转；anti-AD、yhosts 白名单同样放行）----
+union-click.jd.com
+union.m.jd.com
+kepler.jd.com
+ccc-x.jd.com
+# ---- v0.2.27：阿里系网络调度（anti-AD #778：拦 amdc.m.taobao.com 后阿里系 App 按钮 / 页面缺失）----
+amdc.m.taobao.com
+acs.m.taobao.com
+mdn.alipayobjects.com
+t.alipayobjects.com
+# ---- v0.2.27：123 云盘静态资源（217heidai 白名单）----
+statics.123pan.com

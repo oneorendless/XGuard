@@ -1,0 +1,50 @@
+# 内置 HTTPDNS 拦截（源 id: httpdns）。App / 广告 SDK 解析不到这些域名时会退回系统 DNS，从而命中 hosts。
+# 来源：VirgilClyne/GetSomeFries HTTPDNS.Block.list、anti-AD issue #847、AWAvenue 规则。
+# 纯 IP 的端点（阿里 203.107.1.0/24、腾讯 119.29.29.98 等）hosts 管不到，见 `xguard run shield guard on`。
+# 阿里 / 阿里云
+httpdns.alicdn.com
+httpdns-api.aliyuncs.com
+httpdns-sc.aliyuncs.com
+resolvers-cn.httpdns.aliyuncs.com
+# 百度 / 百度智能云
+httpsdns.baidu.com
+httpdns.baidu.com
+httpdns.baidubce.com
+httpdns.bcelive.com
+# 腾讯云 / 微信
+httpdns.pro
+kuaishou.httpdns.pro
+dns.weixin.qq.com
+dns.weixin.qq.com.cn
+aedns.weixin.qq.com
+httpdns.kg.qq.com
+# 快手 / 金山云
+apidns.kwd.inkuai.com
+hdns.ksyun.com
+# 火山引擎（穿山甲同属字节）
+httpdns.volcengineapi.com
+# 网易 / 云信
+httpdns.n.netease.com
+httpdns-sdk.n.netease.com
+nstool.netease.com
+httpdns.music.163.com
+music.httpdns.c.163.com
+lofter.httpdns.c.163.com
+httpdns.yunxinfw.com
+httpdns.yunxindns.com
+# 其他 App
+httpdns.bilivideo.com
+httpdns.c.cdnhwc2.com
+doh.iqiyi.com
+dns.jd.com
+httpdns.calorietech.com
+httpdns.meituan.com
+httpdnsmultiapi.meituan.com
+httpdnsmultiapivip.meituan.com
+httpdnsvip.meituan.com
+httpdns.immomo.com
+httpdns.ocloud.oppomobile.com
+httpdns.push.oppomobile.com
+dns.weibo.cn
+yuyin-httpdns.gslb.yy.com
+imdns.hpplay.cn

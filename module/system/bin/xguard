@@ -1,0 +1,78 @@
+#!/system/bin/sh
+# 防护引擎 Lite 命令行入口：WebUI、管理器与终端共用。
+XG_MODDIR=${XG_MODDIR:-/data/adb/modules/xguard}; export XG_MODDIR
+. "$XG_MODDIR/core/lib.sh"
+core_init_dirs
+core_migrate
+
+usage() {
+cat <<U
+xguard status                 总览（JSON）
+xguard list                   列出防护引擎状态
+xguard enable|disable shield 开关防护引擎（立即生效）
+xguard run shield <动作>      执行 update / stats / activity / test / allow / block 等动作
+xguard state shield           读取状态文件
+xguard config shield [键 [值]] 读写配置
+xguard safe on|off            安全模式
+xguard daemon start|stop|status
+xguard log                    查看防护引擎日志
+U
+}
+
+json_status() {
+  en=false; feat_enabled shield && en=true
+  cf=$(cat "$XG_STATE/conflict.shield" 2>/dev/null | sed 's/"/\\"/g')
+  cw=$(cat "$XG_STATE/conflict.shield.why" 2>/dev/null | head -n1 | sed 's/\\/\\\\/g; s/"/\\"/g')
+  sm=$(sed -n 's/^  "summary": "\(.*\)",\{0,1\}$/\1/p' "$XG_DATA/shield/status.json" 2>/dev/null | head -n1)
+  [ -n "$sm" ] || sm=$(XG_FEATURE=shield XG_FDIR=$XG_FEATURES/shield bb timeout 5 sh "$XG_FEATURES/shield/status.sh" 2>/dev/null | head -n1 | sed 's/"/\\"/g')
+  health=$(feat_health_state shield | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '{"version":"%s","root":"%s","safe_mode":%s,"daemon":"%s","app_install":"","features":[{"id":"shield","name":"%s","icon":"%s","enabled":%s,"conflict":"%s","conflict_reason":"%s","summary":"%s","health":"%s"}]}\n' \
+    "$(prop_get "$XG_MODDIR/module.prop" version)" "$XG_ROOT" "$([ -f "$XG_STATE/safe_mode" ] && echo true || echo false)" \
+    "$(sh "$XG_MODDIR/core/xguardd.sh" status | cut -d' ' -f1)" "$(feat_meta shield name)" "$(feat_meta shield icon shield-check)" "$en" "$cf" "$cw" "$sm" "$health"
+}
+
+case "${1:-}" in
+  status) json_status ;;
+  list)
+    st=off; feat_enabled shield && st=on
+    [ -f "$XG_STATE/conflict.shield" ] && st="conflict($(cat "$XG_STATE/conflict.shield"))"
+    printf '%-10s %-14s %s\n' shield "$st" "$(feat_meta shield name)" ;;
+  enable|disable)
+    [ "${2:-shield}" = shield ] || { echo "无此插件：$2"; exit 1; }
+    if [ "$1" = enable ]; then
+      sh "$XG_MODDIR/core/conflict.sh"
+      [ -f "$XG_STATE/conflict.shield" ] && { echo "冲突：$(cat "$XG_STATE/conflict.shield")"; exit 2; }
+      feat_clear_health shield; settings_set feature.shield.enabled 1; feat_run shield start manual
+    else
+      settings_set feature.shield.enabled 0; feat_run shield stop manual
+    fi
+    echo ok ;;
+  run)
+    [ "${2:-}" = shield ] || { echo "仅支持 shield 插件"; exit 1; }
+    [ $# -ge 3 ] || { usage; exit 2; }
+    act=$3; shift 3
+    case "$act" in ''|*[!a-z_]*) echo '无效动作'; exit 2 ;; esac
+    sh_=$XG_FEATURES/shield/actions/$act.sh; [ -f "$sh_" ] || sh_=$XG_FEATURES/shield/$act.sh
+    [ -f "$sh_" ] || { echo "无此动作：shield $act"; exit 1; }
+    XG_FEATURE=shield XG_FDIR=$XG_FEATURES/shield sh "$sh_" "$@" ;;
+  state)
+    [ "${2:-shield}" = shield ] || { echo '{}'; exit 1; }
+    cat "$XG_DATA/shield/status.json" 2>/dev/null || { echo '{}'; exit 1; } ;;
+  states) echo '@@shield'; cat "$XG_DATA/shield/status.json" 2>/dev/null || echo '{}' ;;
+  config)
+    [ "${2:-shield}" = shield ] || { echo "无此插件：$2"; exit 1; }
+    if [ -z "${3:-}" ]; then cat "$(core_cfg_file shield)" 2>/dev/null || echo '{}'
+    elif [ -z "${4+x}" ]; then core_cfg_get shield "$3"; echo
+    else core_cfg_set shield "$3" "$4" && echo ok; fi ;;
+  emit) shift; sh "$XG_MODDIR/core/xguardd.sh" emit "$@" ;;
+  safe)
+    case "${2:-}" in on|off) ;; *) echo '用法：safe on|off'; exit 2 ;; esac
+    if [ "${2:-}" = on ]; then touch "$XG_STATE/safe_mode" "$XG_MODDIR/skip_mount"
+    else rm -f "$XG_STATE/safe_mode" "$XG_MODDIR/skip_mount"; echo 0 >"$XG_STATE/boot.count"; fi
+    echo "ok，重启生效" ;;
+  daemon) sh "$XG_MODDIR/core/xguardd.sh" "${2:-status}" ;;
+  health) printf 'shield      %s\n' "$(feat_health_state shield)" ;;
+  log) case "${2:-core}" in core|shield) _lf="$XG_LOG/${2:-core}.log" ;; *) exit 2 ;; esac
+       [ -f "$_lf" ] && tail -n 80 "$_lf" 2>/dev/null; exit 0 ;;
+  *) usage ;;
+esac

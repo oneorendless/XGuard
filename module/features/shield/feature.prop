@@ -1,0 +1,13 @@
+# 防护引擎 shield（v0.2.20 ③，原 adblock「去广告」）。旧 id adblock 经 xguard 转发（enable/disable/run/config/state）。
+# 契约：入口只有 start / stop / status / on_event；自定义动作在 actions/；配置 $XG_DATA/shield/config.json；状态 status.json
+name=XGuard
+description=域名防护、实时活动查看、自定义封禁与放行；基于原防护引擎规则引擎的 Xuan 二创
+icon=shield-check
+version=0.8.3
+stages=service
+order=40
+default_enabled=1
+events=net,tick,config
+conflicts=AdGuardHome,adguardhome,hosts,systemless_hosts,bindhosts,Re-Malwack,re-malwack
+timeout=300
+needs_reboot=0
