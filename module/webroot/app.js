@@ -5,6 +5,9 @@ const cli = 'sh /data/adb/modules/xguard/system/bin/xguard';
 let sequence = 0;
 let status = null;
 let stats = null;
+let recovery = null;
+let recoveryLoading = null;
+let recoveryExpiryChecked = 0;
 let activeTab = 'home';
 let hitRules = [];
 let userRules = [];
@@ -78,6 +81,7 @@ async function task(handler, control) {
   finally {
     pending = false; document.querySelector('.app-shell').setAttribute('aria-busy', 'false');
     if (control) control.disabled = false;
+    if (recovery) renderRecovery();
   }
 }
 function requireEnabled() { if (!status?.features?.[0]?.enabled || status.features[0].conflict) throw new Error('请先开启 XGuard 防护并处理冲突'); }
@@ -93,10 +97,13 @@ async function refresh() {
   if (request !== refreshSequence) return;
   status = nextStatus;
   const feature = status.features[0];
+  if (recovery) recovery.pause_until=Number(feature.pause_until || 0);
+  renderPause();
+  void loadRecovery();
   element('toggle').disabled = false; element('toggle').setAttribute('aria-checked', String(feature.enabled));
-  element('protection-title').textContent = status.safe_mode ? '安全模式' : feature.enabled ? '防护已开启' : '防护已暂停';
+  element('protection-title').textContent = status.safe_mode ? '安全模式' : Number(feature.pause_until)>0 ? '防护临时暂停' : feature.enabled ? '防护已开启' : '防护已暂停';
   element('summary').textContent = feature.summary || '尚无状态';
-  element('connection').textContent = status.safe_mode ? '安全模式已开启' : feature.enabled ? 'XGuard 防护已开启' : '防护已关闭';
+  element('connection').textContent = status.safe_mode ? '安全模式已开启' : Number(feature.pause_until)>0 ? 'XGuard 防护临时暂停' : feature.enabled ? 'XGuard 防护已开启' : '防护已关闭';
   const warning = feature.conflict_reason || (feature.conflict ? '模块冲突：' + feature.conflict : '') || (feature.health !== 'ok' ? feature.health : '') || (status.safe_mode ? '关闭安全模式并重启后可恢复防护。' : '');
   element('warning').textContent = warning; element('warning').hidden = !warning;
   element('runtime').textContent = 'Root：' + status.root + ' · 守护进程：' + status.daemon;
@@ -108,7 +115,7 @@ async function refresh() {
   if (!result.error) {
     stats = result.value;
     const modes = { hosts: 'HOSTS 生效', proxy: '代理服务接管', off: '尚未生效' };
-    element('mode').textContent = feature.enabled ? (modes[stats.mode] || stats.mode) : '防护关闭';
+    element('mode').textContent = Number(feature.pause_until)>0 ? '临时暂停' : feature.enabled ? (modes[stats.mode] || stats.mode) : '防护关闭';
     element('rule-count').textContent = number(stats.hosts_rules); element('locked-count').textContent = isVpnMode() ? '需 Root' : stats.splash_locked_apps == null ? '—' : number(stats.splash_locked_apps); element('source-count').textContent = number(stats.sources);
     element('splash-metric-detail').textContent = isVpnMode() ? 'DNS 防护不锁缓存' : stats.locked_count_cached ? '最近核验锁定应用' : '已实际锁定应用';
     element('update-info').textContent = (stats.updating ? '正在更新 · ' : '') + '上次更新：' + age(stats.last_ok) + (stats.capped ? ' · 已达到规则上限' : '');
@@ -132,7 +139,7 @@ async function loadDomains() {
   const request = ++domainLoadSequence;
   const [allowed, blocked] = await Promise.all([json(run('allow')), json(run('block'))]);
   if (request !== domainLoadSequence) return;
-  fill('domains', [['allow', allowed.allow || [], '放行'], ['block', blocked.block || [], '自定义拦截']].flatMap(([kind, list, label]) => list.map(domain => row(domain, label, button('移除', async () => { requireEnabled(); await run(kind, 'remove', domain); await refresh(); })))), '没有自定义域名规则');
+  fill('domains', [['allow', allowed.allow || [], '放行'], ['block', blocked.block || [], '自定义拦截']].flatMap(([kind, list, label]) => list.map(domain => row(domain, label, button('移除', async () => { requireEnabled(); await run(kind, 'remove', domain); await loadRecovery(true); await refresh(); })))), '没有自定义域名规则');
 }
 function activityRow(item) {
   const wrapper = document.createElement('div'); wrapper.className = 'activity-row';
@@ -195,7 +202,7 @@ function renderTrafficStats() {
   element('hosts-stats').hidden = vpn;
   element('hosts-rule-count').textContent = stats ? number(stats.hosts_rules) : '—';
   const hostsActive = status?.features?.[0]?.enabled && stats?.mode === 'hosts';
-  element('hosts-state').textContent = !status || !stats ? '正在读取' : !status.features[0].enabled ? '防护已暂停' : stats.mode === 'proxy' ? '代理接管' : hostsActive ? '已挂载' : '尚未挂载';
+  element('hosts-state').textContent = Number(recovery?.pause_until ?? status?.features?.[0]?.pause_until)>0 ? '临时暂停' : !status || !stats ? '正在读取' : !status.features[0].enabled ? '防护已暂停' : stats.mode === 'proxy' ? '代理接管' : hostsActive ? '已挂载' : '尚未挂载';
   element('hosts-state').classList.toggle('active', Boolean(hostsActive));
   element('hosts-matched-domains').textContent = activityPayload ? number(new Set((snapshot.items || []).filter(item => item.rule_blocked).map(item => item.domain)).size) : '—';
   renderRecentTraffic(snapshot, vpn);
@@ -231,7 +238,7 @@ async function changeDomain(kind, domain) {
   if (kind === 'block' && !result.blocked) throw new Error('域名没有写入封禁规则，请检查放行名单或保护名单');
   toast(kind === 'allow' ? '已放行此域名' : '已加入封禁规则，新连接生效');
   if (!isVpnMode()) for (const item of activityPayload?.snapshot?.items || []) if (item.domain === domain) item.rule_blocked = kind === 'block';
-  renderActivity(true); renderTrafficStats(); await loadDomains();
+  renderActivity(true); renderTrafficStats(); await loadDomains(); await loadRecovery(true);
 }
 function switchPage(id) {
   if (activeTab === id) return;
@@ -344,7 +351,17 @@ async function addRule(pkg, path) { requireEnabled(); if (isVpnMode()) throw new
 document.querySelectorAll('nav button').forEach(control => { control.onclick = () => switchPage(control.dataset.tab); });
 element('refresh').onclick = () => { if (!rootReady && window.XGuard) element('root-dialog').showModal(); else task(refresh, element('refresh')); };
 element('toggle').onclick = () => task(async () => { if (status.safe_mode) throw new Error('请先关闭安全模式并重启'); await exec([status.features[0].enabled ? 'disable' : 'enable', 'shield']); await refresh(); }, element('toggle'));
-element('update').onclick = () => task(async () => { requireEnabled(); toast('正在下载规则，请稍候…'); await run('update'); toast('规则更新完成'); await refresh(); }, element('update'));
+element('update').onclick = () => task(async () => {
+  requireEnabled();
+  if (Number(recovery?.pause_until ?? status.features[0].pause_until)>0) throw new Error('请先结束临时暂停再更新规则');
+  const dialog=element('rule-update-dialog'); element('rule-update-state').textContent='正在下载与核对规则…'; element('rule-update-summary').replaceChildren(); dialog.showModal();
+  try {
+    await run('update'); await loadRecovery(true);
+    element('rule-update-state').textContent='更新完成';
+    element('rule-update-summary').append(row('域名变化', '新增 '+number(recovery?.update_added)+' · 移除 '+number(recovery?.update_removed)),row('恢复快照',recovery?.backup_time?'已保留更新前的源缓存，可在规则页恢复':'本次没有生成新的恢复快照'));
+  } catch(error) { element('rule-update-state').textContent='更新未完成：'+error.message; }
+  await refresh();
+}, element('update'));
 element('test').onclick = () => task(async () => {
   const dialog = element('check-dialog');
   element('check-state').textContent = '正在检查规则、挂载和解析状态…';
@@ -358,7 +375,7 @@ element('test').onclick = () => task(async () => {
   } catch (error) { element('check-state').textContent = '检查失败：' + error.message; }
 }, element('test'));
 element('query-domain').onclick = () => task(async () => { const result = await json(run('query', domainValue())); element('domain-result').textContent = result.allowed ? '当前已放行' : result.blocked ? '当前已封禁' : result.in_source ? '命中规则源，当前拦截' : '未命中规则'; });
-for (const kind of ['allow', 'block']) element(kind + '-domain').onclick = () => task(async () => { const value = domainValue(kind === 'allow'); if (value.startsWith('*.')) { requireEnabled(); await run(kind, 'add', value); toast('通配放行已保存'); await loadDomains(); } else await changeDomain(kind, value); }, element(kind + '-domain'));
+for (const kind of ['allow', 'block']) element(kind + '-domain').onclick = () => task(async () => { const value = domainValue(kind === 'allow'); if (value.startsWith('*.')) { requireEnabled(); await run(kind, 'add', value); toast('通配放行已保存'); await loadDomains(); await loadRecovery(true); } else await changeDomain(kind, value); }, element(kind + '-domain'));
 let intervalDraft = '24';
 function syncUpdateInterval() {
   const option = element('interval').selectedOptions[0];
@@ -421,6 +438,57 @@ element('logs').onclick = () => task(async () => {
   element('logs-state').textContent = '读取完成，可关闭窗口返回设置。';
 }, element('logs'));
 element('safe-mode').onclick = () => task(async () => { const enabled = !status.safe_mode; if (await confirmAction(enabled ? '开启安全模式' : '关闭安全模式', '重启手机后生效。')) { await exec(['safe', enabled ? 'on' : 'off']); toast('已保存，请重启手机'); await refresh(); } });
+const healthLabels={ok:'运行正常',off:'防护已关闭',paused:'防护临时暂停',no_rules:'缺少可用规则',not_mounted:'HOSTS 未挂载',daemon_stopped:'守护进程未运行',collector_stopped:'采集器未运行',vpn_stopped:'VPN 服务未运行',permission_required:'需要 VPN 授权'};
+async function loadRecovery(fresh=false) {
+  if (recoveryLoading) { await recoveryLoading; if (!fresh) return; }
+  const operation=(async()=>{
+    try { recovery=await json(run('recovery','status')); renderRecovery(); renderTrafficStats(); }
+    catch(error) { element('backup-info').textContent='读取恢复状态失败：'+error.message; }
+  })();
+  recoveryLoading=operation;
+  try { await operation; } finally { if(recoveryLoading===operation) recoveryLoading=null; }
+}
+function renderPause() {
+  const feature=status?.features?.[0], until=Number(recovery?.pause_until ?? feature?.pause_until ?? 0), seconds=Math.max(0,Math.ceil(until-Date.now()/1000));
+  element('pause-countdown').textContent=until>0 ? seconds>0 ? Math.floor(seconds/60)+' 分 '+seconds%60+' 秒后恢复' : '正在恢复防护…' : '按需临时暂停';
+  element('pause-protection').textContent=until>0?'立即恢复':'暂停 5 分钟'; element('pause-protection').disabled=!feature?.enabled;
+  element('pause-note').textContent=isVpnMode()?'临时暂停只停止 DNS 拦截，VPN 继续转发 DNS；到期自动恢复。':'临时暂停 hosts、网络补防和缓存锁定；后台约 15 秒检查一次，到期恢复。';
+}
+function renderRecovery() {
+  renderPause();
+  element('undo-domain').disabled=!recovery?.undo_available;
+  element('rollback-rules').disabled=!recovery?.backup_time;
+  element('rule-diff').textContent=recovery?.update_time?'最近更新 '+age(recovery.update_time)+' · 新增 '+number(recovery.update_added)+' · 移除 '+number(recovery.update_removed)+' 个规则域名':'尚无本次更新记录';
+  element('backup-info').textContent=(recovery?.backup_time?'更新前快照：'+age(recovery.backup_time):'规则发生变化的成功更新会保留一份更新前快照')+(!isVpnMode() && Number(recovery?.update_hold_until)>Date.now()/1000?' · 自动更新暂停至 '+age(recovery.update_hold_until):'');
+  const health=recovery?.health || {}; element('health-state').textContent=healthLabels[health.state] || '尚未检查';
+  element('health-time').textContent=health.checked_at?age(health.checked_at):'';
+  element('health-summary').textContent=health.state==='ok'?'最近检查的运行组件正常；不代表所有广告都能被拦截。':health.state==='paused'?'当前按用户选择临时暂停，到期后恢复。':health.state==='off'?'防护开关已关闭，自动维护不会重新打开。':isVpnMode()?'可检查 VPN 权限、服务与规则加载状态，异常时尝试修复。':'可检查实际挂载、守护进程与采集服务，异常时尝试修复。';
+}
+element('pause-protection').onclick=()=>task(async()=>{
+  const paused=Number(recovery?.pause_until ?? status?.features?.[0]?.pause_until)>0;
+  if (!paused && !await confirmAction('暂停防护 5 分钟',isVpnMode()?'期间 DNS 请求将正常转发，到期自动恢复拦截。':'期间暂时撤下 hosts、网络补防和缓存锁定，到期自动恢复。')) return;
+  await run('recovery',paused?'resume':'pause'); await loadRecovery(true); await refresh();
+},element('pause-protection'));
+element('undo-domain').onclick=()=>task(async()=>{
+  if (!await confirmAction('撤销最近域名操作','恢复最近一次放行、封禁或移除之前的域名名单。')) return;
+  await run('recovery','undo'); await loadDomains(); await loadRecovery(true); toast('已撤销最近一次域名操作');
+},element('undo-domain'));
+element('rollback-rules').onclick=()=>task(async()=>{
+  if (!await confirmAction('恢复更新前规则',isVpnMode()?'恢复上一份源缓存，保留当前域名放行与封禁名单。规则仍需手动更新。':'恢复上一份源缓存，保留当前域名放行与封禁名单；自动更新暂停 24 小时，手动更新可提前结束。')) return;
+  await run('recovery','rollback'); await loadRecovery(true); await refresh(); toast('已恢复更新前规则');
+},element('rollback-rules'));
+async function checkHealth(repair=false) {
+  const dialog=element('health-dialog'); element('health-result').textContent=repair?'正在尝试修复并检查…':'正在检查实际运行状态…'; element('health-items').replaceChildren(); dialog.showModal();
+  try {
+    const health=await json(run('recovery',repair?'repair':'check')); element('health-result').textContent=healthLabels[health.state] || health.state;
+    const parts=isVpnMode()?[['VPN 权限',health.vpn_authorized],['VPN 服务',health.collector_running]]:[['HOSTS 挂载',health.hosts_mounted],['守护进程',health.daemon_running],['域名采集',health.collector_running]];
+    element('health-items').append(...parts.map(([title,ok])=>row(title,ok?'已就绪':'未就绪或当前无需启用')),row('检查时间',age(health.checked_at)));
+    await loadRecovery(true);
+  } catch(error) { element('health-result').textContent='检查未完成：'+error.message; }
+}
+element('health-check').onclick=()=>task(()=>checkHealth(),element('health-check'));
+element('health-repair').onclick=()=>task(()=>checkHealth(true),element('health-repair'));
+setInterval(()=>{renderPause(); if(status && !pending && !document.hidden && Date.now()-recoveryExpiryChecked>15000 && Number(recovery?.pause_until)>0 && Number(recovery.pause_until)<=Date.now()/1000) { recoveryExpiryChecked=Date.now(); void loadRecovery().then(()=>refresh()); }},1000);
 element('activity-open').onclick = () => switchPage('activity');
 element('activity-refresh').onclick = () => task(loadActivity, element('activity-refresh'));
 element('activity-clear').onclick = () => task(async () => { if (await confirmAction('清空域名记录', '清空最近观察到的域名，防护规则会保留。')) { activityPayload = await json(run('activity', 'clear')); renderActivity(true); renderTrafficStats(); } }, element('activity-clear'));

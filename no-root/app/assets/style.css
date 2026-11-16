@@ -80,3 +80,5 @@ html[data-glass-renderer=solid] .editor-details .card{background:transparent}
   }
   .editor-details .card{background:transparent}
 }
+
+.recovery-card .section-heading,.health-card .section-heading{margin:0 0 12px;align-items:center;gap:12px}.recovery-card h2,.health-card h2{margin:0;font-size:16px}.recovery-card .section-heading small{font-size:10px;color:var(--primary);text-align:right;font-variant-numeric:tabular-nums}.recovery-card .actions{display:flex;gap:10px;flex-wrap:wrap}.recovery-card .actions button{flex:1;min-width:120px}.health-items{border:1px solid var(--divider);border-radius:14px;padding:0 14px;margin:18px 0;max-height:42dvh;overflow:auto}.health-items:empty{display:none}.health-items .row{padding:13px 0;min-width:0}.health-items .row b{font-size:12px}.health-items .row small{overflow-wrap:anywhere;line-height:1.6}.health-card p,.recovery-card p{line-height:1.7}#health-state{color:var(--primary)}#health-time{font-size:10px;color:var(--secondary-text)}#rule-diff,#backup-info{line-height:1.8}#rollback-rules{margin-top:4px}#health-result,#rule-update-state{line-height:1.7}

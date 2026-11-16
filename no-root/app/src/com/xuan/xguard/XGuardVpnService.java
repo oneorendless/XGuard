@@ -41,11 +41,22 @@ public final class XGuardVpnService extends VpnService {
     private static long queries, blockedQueries, failedQueries, counterStarted;
     private long lastCounterSave;
     private static volatile boolean running;
+    private static volatile XGuardVpnService instance;
     private ParcelFileDescriptor tunnel;
     private Thread worker;
+    private final android.os.Handler healthHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable healthTick = new Runnable() {
+        @Override public void run() {
+            if (!getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("enabled",false)) { shutdown(); return; }
+            if (!running && (worker==null || !worker.isAlive()) && VpnService.prepare(XGuardVpnService.this)==null) onStartCommand(null,0,0);
+            getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, notification());
+            healthHandler.postDelayed(this, 15000);
+        }
+    };
 
     @Override public void onCreate() {
         super.onCreate();
+        instance=this;
         synchronized (XGuardVpnService.class) {
             SharedPreferences stats = getSharedPreferences("xguard_stats", MODE_PRIVATE);
             queries = stats.getLong("queries", 0); blockedQueries = stats.getLong("blocked", 0); failedQueries = stats.getLong("failed", 0);
@@ -56,11 +67,14 @@ public final class XGuardVpnService extends VpnService {
         if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         else if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification(), 0);
         else startForeground(NOTIFICATION_ID, notification());
+        healthHandler.postDelayed(healthTick, 15000);
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {
+        if (!getSharedPreferences("xguard",MODE_PRIVATE).getBoolean("enabled",false)) { shutdown(); return START_NOT_STICKY; }
         if (worker == null || !worker.isAlive()) {
             try {
+                closeTunnel();
                 tunnel = new Builder().setSession("XGuard").setMtu(1500).addAddress("10.231.0.2", 32).addDnsServer(DNS_IP).addRoute(DNS_IP, 32).establish();
                 if (tunnel != null) {
                     running = true;
@@ -75,12 +89,15 @@ public final class XGuardVpnService extends VpnService {
     }
 
     @Override public void onTaskRemoved(Intent rootIntent) {
+        if (!getSharedPreferences("xguard",MODE_PRIVATE).getBoolean("enabled",false)) return;
         Intent restart = new Intent(getApplicationContext(), XGuardVpnService.class);
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(restart); else startService(restart);
         super.onTaskRemoved(rootIntent);
     }
 
     @Override public void onDestroy() {
+        if (instance==this) instance=null;
+        healthHandler.removeCallbacks(healthTick);
         saveCounters();
         running = false;
         if (worker != null) worker.interrupt();
@@ -89,25 +106,38 @@ public final class XGuardVpnService extends VpnService {
     }
 
     @Override public void onRevoke() {
-        running = false;
-        closeTunnel();
-        stopSelf();
+        getSharedPreferences("xguard",MODE_PRIVATE).edit().putBoolean("enabled",false).remove("pause_until").apply();
+        shutdown();
         super.onRevoke();
     }
 
     public static boolean isRunning() { return running; }
+    public static void requestStop(Context context) {
+        XGuardVpnService service=instance;
+        if(service!=null) service.healthHandler.post(service::shutdown);
+        else context.stopService(new Intent(context,XGuardVpnService.class));
+    }
+    private void shutdown() {
+        healthHandler.removeCallbacks(healthTick);
+        running=false;
+        if(worker!=null) worker.interrupt();
+        closeTunnel();
+        saveCounters();
+        stopForeground(true);
+        stopSelf();
+    }
 
     public static int ruleCount(Context context) {
         loadRules(context);
         return RULES.size();
     }
+    public static Set<String> ruleSnapshot(Context context) { loadRules(context); return new HashSet<>(RULES); }
 
     public static synchronized void reloadRules(Context context) {
         Set<String> next = new HashSet<>();
         loadAsset(context, "splash-domains.list", next);
         SharedPreferences prefs = context.getSharedPreferences("xguard", MODE_PRIVATE);
-        Set<String> enabled = new HashSet<>(prefs.getStringSet("enabled_sources", Collections.emptySet()));
-        if (enabled.isEmpty()) { enabled.add("baseline"); enabled.add("awavenue"); enabled.add("antiad"); enabled.add("goodbyeads"); enabled.add("adaway"); }
+        Set<String> enabled = RecoveryStore.enabledSources(context);
         if (enabled.contains("baseline")) loadAsset(context, "blocklist.txt", next);
         if (enabled.contains("httpdns")) loadAsset(context, "httpdns.list", next);
         for (String id : enabled) if (!"baseline".equals(id) && !"httpdns".equals(id)) loadFile(new File(context.getFilesDir(), "source_" + id + ".list"), next);
@@ -161,10 +191,11 @@ public final class XGuardVpnService extends VpnService {
         try (FileInputStream input = new FileInputStream(tunnel.getFileDescriptor()); FileOutputStream output = new FileOutputStream(tunnel.getFileDescriptor())) {
             while (running && !Thread.currentThread().isInterrupted()) {
                 int length = input.read(packet);
-                if (length <= 0) continue;
+                if (length < 0) break;
+                if (length == 0) continue;
                 DnsQuery query = parseQuery(packet, length);
                 if (query == null) continue;
-                boolean blocked = isBlocked(this, query.name);
+                boolean blocked = !RecoveryStore.isPaused(this) && isBlocked(this, query.name);
                 byte[] dns = blocked ? blockedResponse(query) : forward(query.payload, query.payloadLength);
                 boolean failed = dns == null;
                 if (failed) dns = failureResponse(query);
@@ -177,6 +208,7 @@ public final class XGuardVpnService extends VpnService {
                 }
             }
         } catch (Exception ignored) {
+        } finally {
             running = false;
         }
     }
@@ -298,7 +330,7 @@ public final class XGuardVpnService extends VpnService {
     private static boolean matches(Set<String> rules, String domain) {
         String current = normalize(domain);
         while (!current.isEmpty()) {
-            if (rules.contains(current)) return true;
+            if (rules.contains(current) || rules.contains("*."+current)) return true;
             int dot = current.indexOf('.'); if (dot < 0) break; current = current.substring(dot + 1);
         }
         return false;
@@ -319,7 +351,8 @@ public final class XGuardVpnService extends VpnService {
         Intent intent = new Intent(this, MainActivity.class);
         PendingIntent pending = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder builder = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, CHANNEL) : new Notification.Builder(this);
-        return builder.setSmallIcon(android.R.drawable.ic_menu_info_details).setContentTitle("XGuard 正在保护网络").setContentText("无 Root DNS 广告拦截 · 点击打开控制面板").setContentIntent(pending).setOngoing(true).setCategory(Notification.CATEGORY_SERVICE).build();
+        boolean paused=RecoveryStore.isPaused(this);
+        return builder.setSmallIcon(android.R.drawable.ic_menu_info_details).setContentTitle(paused?"XGuard 临时暂停拦截":"XGuard 正在保护网络").setContentText(paused?"到期自动恢复 · VPN 继续转发 DNS":"无 Root DNS 广告拦截 · 点击打开控制面板").setContentIntent(pending).setOngoing(true).setCategory(Notification.CATEGORY_SERVICE).build();
     }
 
     private static int checksum(byte[] data, int offset, int length) {

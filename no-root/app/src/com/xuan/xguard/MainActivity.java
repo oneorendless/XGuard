@@ -125,6 +125,9 @@ public final class MainActivity extends Activity {
     }
 
     private void startVpnService() {
+        synchronized (RecoveryStore.class) { startVpnServiceLocked(); }
+    }
+    private void startVpnServiceLocked() {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 8304);
         getSharedPreferences("xguard", MODE_PRIVATE).edit().putBoolean("enabled", true).putBoolean("autostart_enabled", true).apply();
         Intent service = new Intent(this, XGuardVpnService.class);
@@ -132,8 +135,11 @@ public final class MainActivity extends Activity {
     }
 
     private void stopVpnService() {
-        getSharedPreferences("xguard", MODE_PRIVATE).edit().putBoolean("enabled", false).apply();
-        stopService(new Intent(this, XGuardVpnService.class));
+        synchronized (RecoveryStore.class) { stopVpnServiceLocked(); }
+    }
+    private void stopVpnServiceLocked() {
+        getSharedPreferences("xguard", MODE_PRIVATE).edit().putBoolean("enabled", false).remove("pause_until").apply();
+        XGuardVpnService.requestStop(this);
     }
 
     private void deliver(final String callback, final int code, final String output) {
@@ -251,6 +257,7 @@ public final class MainActivity extends Activity {
             String action = values.getString(2);
             SharedPreferences prefs = getSharedPreferences("xguard", MODE_PRIVATE);
             if ("stats".equals(action)) return statsJson(prefs);
+            if ("recovery".equals(action)) return recoveryCommand(values, prefs);
             if ("allow".equals(action) || "block".equals(action)) return domainCommand(action, values, prefs);
             if ("query".equals(action)) return queryJson(values.getString(3), prefs);
             if ("activity".equals(action)) return activityCommand(values, prefs);
@@ -263,9 +270,10 @@ public final class MainActivity extends Activity {
             return "{}";
         }
         private String statusJson() throws Exception {
-            boolean enabled = getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("enabled", false) && XGuardVpnService.isRunning();
-            JSONObject feature = new JSONObject(); feature.put("enabled", enabled); feature.put("conflict", false); feature.put("health", enabled ? "ok" : "off"); feature.put("summary", enabled ? "本地 VPN 正在拦截广告域名" : "点击开关开启本地 VPN 防护");
-            JSONObject result = new JSONObject(); result.put("root", "无 Root · Android VPN"); result.put("daemon", enabled ? "前台服务运行中" : "未启动"); result.put("safe_mode", false); result.put("version", "0.8.6"); result.put("features", new JSONArray().put(feature));
+            boolean enabled = getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("enabled", false);
+            boolean running = XGuardVpnService.isRunning(), paused = RecoveryStore.isPaused(MainActivity.this);
+            JSONObject feature = new JSONObject(); feature.put("enabled", enabled); feature.put("conflict", false); feature.put("health", enabled && !running ? "VPN 服务未运行" : "ok"); feature.put("pause_until", paused ? RecoveryStore.pausedUntil(MainActivity.this) : 0); feature.put("summary", !enabled ? "点击开关开启本地 VPN 防护" : !running ? "防护已开启，但 VPN 服务未运行，请检查并修复" : paused ? "临时暂停 DNS 拦截，VPN 继续转发 DNS" : "本地 VPN 正在拦截广告域名");
+            JSONObject result = new JSONObject(); result.put("root", "无 Root · Android VPN"); result.put("daemon", running ? "前台服务运行中" : "未运行"); result.put("safe_mode", false); result.put("version", "0.8.7"); result.put("features", new JSONArray().put(feature));
             return result.toString();
         }
         private String statsJson(SharedPreferences prefs) throws Exception {
@@ -274,7 +282,7 @@ public final class MainActivity extends Activity {
         }
         private String domainCommand(String kind, JSONArray values, SharedPreferences prefs) throws Exception {
             java.util.Set<String> set = new java.util.HashSet<>(prefs.getStringSet("custom_" + kind, java.util.Collections.emptySet()));
-            if (values.length() >= 5) { String op = values.getString(3); String domain = values.getString(4).toLowerCase(java.util.Locale.US); if ("add".equals(op)) set.add(domain); else if ("remove".equals(op)) set.remove(domain); prefs.edit().putStringSet("custom_" + kind, set).apply(); return "{}"; }
+            if (values.length() >= 5) { RecoveryStore.domainChange(MainActivity.this,kind,values.getString(3),values.getString(4)); return "{}"; }
             JSONObject result = new JSONObject(); result.put(kind, new JSONArray(set)); return result.toString();
         }
         private String queryJson(String domain, SharedPreferences prefs) throws Exception {
@@ -287,6 +295,9 @@ public final class MainActivity extends Activity {
             JSONObject result = XGuardVpnService.activityJson(MainActivity.this); result.getJSONObject("collector").put("enabled", prefs.getBoolean("collector", true)); return result.toString();
         }
         private String sourcesCommand(JSONArray values, SharedPreferences prefs) throws Exception {
+            synchronized (RecoveryStore.class) { return sourcesCommandLocked(values,prefs); }
+        }
+        private String sourcesCommandLocked(JSONArray values, SharedPreferences prefs) throws Exception {
             Set<String> enabled = enabledSourceIds(prefs);
             Set<String> custom = new HashSet<>(prefs.getStringSet("custom_sources", java.util.Collections.emptySet()));
             if (values.length() >= 5 && "enable".equals(values.getString(3))) enabled.add(values.getString(4));
@@ -312,25 +323,33 @@ public final class MainActivity extends Activity {
         private int sourceCount(SourceSpec spec) { if ("baseline".equals(spec.id)) return XGuardVpnService.countAsset(MainActivity.this, "blocklist.txt"); if ("httpdns".equals(spec.id)) return XGuardVpnService.countAsset(MainActivity.this, "httpdns.list"); return XGuardVpnService.countSourceFile(MainActivity.this, spec.id); }
         private String sourceResult(SourceSpec spec) { if (spec.urls.length == 0) return sourceCount(spec) > 0 ? "离线可用" : "未打包"; return sourceCount(spec) > 0 ? "已缓存" : "点击更新规则下载"; }
         private String updateSources(SharedPreferences prefs) throws Exception {
+            synchronized (RecoveryStore.class) { return updateSourcesLocked(prefs); }
+        }
+        private String updateSourcesLocked(SharedPreferences prefs) throws Exception {
+            if (RecoveryStore.isPaused(MainActivity.this)) throw new IOException("请先结束临时暂停再更新规则");
+            Set<String> before = XGuardVpnService.ruleSnapshot(MainActivity.this);
+            RecoveryStore.beginUpdate(MainActivity.this);
             Set<String> enabled = enabledSourceIds(prefs); int updated = 0; int failed = 0;
             for (String id : enabled) { SourceSpec spec = sourceSpec(id); if (spec == null || spec.urls.length == 0) continue; try { if (downloadSource(spec)) updated++; else failed++; } catch (Exception error) { failed++; } }
             XGuardVpnService.reloadRules(MainActivity.this);
-            prefs.edit().putLong("last_update", System.currentTimeMillis() / 1000L).apply();
-            if (updated == 0 && failed > 0) throw new IOException("订阅下载失败，请检查网络后重试");
-            JSONObject result = new JSONObject(); result.put("updated", updated); result.put("failed", failed); result.put("rules", XGuardVpnService.ruleCount(MainActivity.this)); return result.toString();
+            if (updated == 0 && failed > 0) { RecoveryStore.cancelUpdate(MainActivity.this); prefs.edit().putString("last_update_result","fail").apply(); throw new IOException("订阅下载失败，已保留旧规则，请检查网络后重试"); }
+            JSONObject diff;
+            try { diff=RecoveryStore.finishUpdate(MainActivity.this,before); }
+            catch(Exception error) { RecoveryStore.abortUpdate(MainActivity.this); throw error; }
+            prefs.edit().putLong("last_update", System.currentTimeMillis() / 1000L).putString("last_update_result",failed>0?"partial":"ok").remove("update_hold_until").apply();
+            JSONObject result = new JSONObject(); result.put("updated", updated); result.put("failed", failed); result.put("rules", XGuardVpnService.ruleCount(MainActivity.this)); result.put("diff",diff); return result.toString();
         }
         private boolean downloadSource(SourceSpec spec) throws Exception {
             File target = new File(getFilesDir(), "source_" + spec.id + ".list"); File temp = new File(target.getPath() + ".tmp");
             for (String address : spec.urls) {
                 HttpURLConnection connection = null;
                 try {
-                    connection = (HttpURLConnection) new URL(address).openConnection(); connection.setConnectTimeout(10000); connection.setReadTimeout(30000); connection.setInstanceFollowRedirects(true); connection.setRequestProperty("User-Agent", "XGuard/0.8.6");
+                    connection = (HttpURLConnection) new URL(address).openConnection(); connection.setConnectTimeout(10000); connection.setReadTimeout(30000); connection.setInstanceFollowRedirects(true); connection.setRequestProperty("User-Agent", "XGuard/0.8.7");
                     if (connection.getResponseCode() / 100 != 2) continue;
                     try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8)); BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(temp), StandardCharsets.UTF_8))) {
                         String line; long bytes = 0; while ((line = reader.readLine()) != null) { bytes += line.length() + 1; if (bytes > 20L * 1024L * 1024L) throw new IOException("订阅过大"); writer.write(line); writer.newLine(); }
                     }
                     if (XGuardVpnService.countSourceFile(temp) < spec.minimumRules) { temp.delete(); continue; }
-                    if (target.exists() && !target.delete()) throw new IOException("无法替换订阅缓存");
                     if (!temp.renameTo(target)) throw new IOException("无法保存订阅缓存");
                     return true;
                 } catch (Exception ignored) {
@@ -340,6 +359,28 @@ public final class MainActivity extends Activity {
             return false;
         }
         private String testJson() throws Exception { JSONObject result = new JSONObject(); result.put("verdict", XGuardVpnService.isRunning() ? "ok" : "off"); result.put("warnings", new JSONArray()); return result.toString(); }
+        private String recoveryCommand(JSONArray values, SharedPreferences prefs) throws Exception {
+            synchronized (RecoveryStore.class) { return recoveryCommandLocked(values,prefs); }
+        }
+        private String recoveryCommandLocked(JSONArray values, SharedPreferences prefs) throws Exception {
+            String op = values.optString(3,"status");
+            if ("pause".equals(op)) { if (!prefs.getBoolean("enabled",false) || !XGuardVpnService.isRunning()) throw new IOException("请先开启 VPN 防护"); prefs.edit().putLong("pause_until",System.currentTimeMillis()/1000L+300).apply(); }
+            else if ("resume".equals(op)) prefs.edit().remove("pause_until").apply();
+            else if ("rollback".equals(op)) RecoveryStore.rollback(MainActivity.this);
+            else if ("undo".equals(op)) RecoveryStore.undoDomain(MainActivity.this);
+            else if ("check".equals(op) || "repair".equals(op)) {
+                if ("repair".equals(op) && prefs.getBoolean("enabled",false) && !RecoveryStore.isPaused(MainActivity.this)) {
+                    if (VpnService.prepare(MainActivity.this) != null) throw new IOException("VPN 权限已失效，请重新授权");
+                    XGuardVpnService.reloadRules(MainActivity.this);
+                    if (!XGuardVpnService.isRunning()) { startVpnService(); for(int i=0;i<20 && !XGuardVpnService.isRunning();i++) Thread.sleep(100); }
+                }
+                boolean desired = prefs.getBoolean("enabled",false), running = XGuardVpnService.isRunning(), authorized = VpnService.prepare(MainActivity.this)==null;
+                String state = !desired?"off":RecoveryStore.isPaused(MainActivity.this)?"paused":!authorized?"permission_required":!running?"vpn_stopped":XGuardVpnService.ruleCount(MainActivity.this)==0?"no_rules":"ok";
+                JSONObject health=new JSONObject(); health.put("state",state); health.put("checked_at",System.currentTimeMillis()/1000L); health.put("desired",desired); health.put("paused",RecoveryStore.isPaused(MainActivity.this)); health.put("collector_running",running); health.put("collector_enabled",prefs.getBoolean("collector",true)); health.put("action",op); health.put("mode","dns-vpn"); health.put("vpn_authorized",authorized);
+                prefs.edit().putString("last_health",health.toString()).apply(); return health.toString();
+            } else if (!"status".equals(op)) throw new IOException("未知恢复操作");
+            JSONObject result = RecoveryStore.status(MainActivity.this); result.put("health",new JSONObject(prefs.getString("last_health","{}"))); return result.toString();
+        }
         private String settingsCommand(String action, JSONArray values, SharedPreferences prefs) throws Exception { if ("guard".equals(action) && values.length() >= 4) prefs.edit().putBoolean("guard", "on".equals(values.getString(3))).apply(); if ("set".equals(action) && values.length() >= 5) prefs.edit().putBoolean(values.getString(3), "1".equals(values.getString(4))).apply(); return "{}"; }
     }
 

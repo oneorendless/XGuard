@@ -10,6 +10,7 @@ public final class BootReceiver extends BroadcastReceiver {
     @Override public void onReceive(Context context, Intent intent) {
         if (intent == null || (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction()) && !Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction()))) return;
         if (!context.getSharedPreferences("xguard", Context.MODE_PRIVATE).getBoolean("autostart_enabled", false)) return;
+        if (!context.getSharedPreferences("xguard", Context.MODE_PRIVATE).getBoolean("enabled", false)) return;
         if (VpnService.prepare(context) != null) return;
         context.getSharedPreferences("xguard", Context.MODE_PRIVATE).edit().putBoolean("enabled", true).apply();
         Intent service = new Intent(context, XGuardVpnService.class);

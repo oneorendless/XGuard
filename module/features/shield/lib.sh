@@ -213,7 +213,10 @@ bind_mount_all() {
   hosts_mounted
 }
 
-hosts_on() {
+hosts_on() (
+  feat_enabled "$SHIELD" && ! shield_paused || return 0
+  recovery_lock mount || return 1
+  feat_enabled "$SHIELD" && ! shield_paused || return 0
   [ -s "$HOSTS_SRC" ] || return 1
   head -n1 "$HOSTS_SRC" | grep -q "^$MARK" || return 1
   hosts_set_perm "$HOSTS_SRC"
@@ -239,8 +242,9 @@ hosts_on() {
   if overlay_mount && hosts_mounted; then touch "$AD_DIR/method.overlay"; rm -f "$AD_DIR/mount.fail"; log $SHIELD "hosts 已用 overlay 挂载（bind 不可用）"; return 0; fi
   [ $_fl = 1 ] && log $SHIELD "hosts 挂载失败：bind 和 overlay 都不行"
   date +%s >"$AD_DIR/mount.fail"; return 1
-}
-hosts_off() {
+)
+hosts_off() (
+  recovery_lock mount || return 1
   # zn / hfr：目标文件还是防护引擎写的就恢复默认
   for _tg in /data/adb/hostsredirect/hosts /data/adb/hosts; do
     head -n1 "$_tg" 2>/dev/null | grep -q "^$MARK" && { stock_hosts >"$_tg"; hosts_set_perm "$_tg"; log $SHIELD "hosts 重定向 $_tg 已恢复默认"; }
@@ -264,7 +268,7 @@ hosts_off() {
   done
   [ $_did -gt 0 ] && log $SHIELD "hosts 已撤下（$_did 次卸载）"
   return 0
-}
+)
 # 残留检查（关闭后 App / 自检用）：输出仍能看到防护引擎 hosts 的进程数，0 = 干净
 hosts_residue() {
   _c=0; _seen=""
@@ -304,7 +308,8 @@ normalize() {
 
 # 由各源缓存 + 自定义拦截 - 放行 生成最终 hosts（不联网）。
 # 原地写入 $HOSTS_SRC（bind 指向的 inode 不变，所有 App 立即看到新内容，不必重挂）
-hosts_build() {
+hosts_build() (
+  recovery_lock build || return 1
   cap=$(core_cfg_get $SHIELD hosts_max 200000)
   case "$cap" in ''|*[!0-9]*) cap=200000 ;; esac
   tmp=$AD_DIR/hosts.new
@@ -336,11 +341,16 @@ hosts_build() {
   if [ "${rules:-0}" -eq 0 ] && [ ! -s "$BLOCK" ]; then rm -f "$tmp"; return 1; fi
   # 内容没变（忽略首行时间戳）就不动
   if [ -s "$HOSTS_SRC" ] && [ "$(sed 1d "$tmp" | cksum)" = "$(sed 1d "$HOSTS_SRC" | cksum)" ]; then rm -f "$tmp"; meta_set rules "$rules"; return 0; fi
-  cat "$tmp" >"$HOSTS_SRC"; rm -f "$tmp"; hosts_set_perm "$HOSTS_SRC"
+  if [ -f "$HOSTS_SRC" ]; then cp -p "$HOSTS_SRC" "$AD_DIR/hosts.write-backup" || { rm -f "$tmp"; return 1; }; fi
+  if ! cat "$tmp" >"$HOSTS_SRC"; then
+    [ ! -f "$AD_DIR/hosts.write-backup" ] || cat "$AD_DIR/hosts.write-backup" >"$HOSTS_SRC"
+    rm -f "$tmp" "$AD_DIR/hosts.write-backup"; return 1
+  fi
+  rm -f "$tmp" "$AD_DIR/hosts.write-backup"; hosts_set_perm "$HOSTS_SRC"
   meta_set rules "$rules"; meta_set capped "$(prop_get "$AD_DIR/build.cnt" cut 0)"; meta_set allowed_hits "$(prop_get "$AD_DIR/build.cnt" allowed 0)"
   hosts_mounted && hosts_publish
   return 0
-}
+)
 meta_set() { prop_set "$META" "$1" "$2"; }
 
 # 下载：curl（系统 CA）→ curl 指定 Android CA 目录 → busybox wget --no-check-certificate（同 bindhosts / Re-Malwack）。
@@ -387,7 +397,13 @@ src_fetch() {   # <id> <url...>
 }
 
 # 自动更新：默认每天最多一次（hosts_interval_h 可调，0=只手动）；各源并行下载；失败保留旧缓存；结果写 hosts.meta 给 App 看
-hosts_update() {   # [force]
+hosts_update() (   # [force]
+  shield_paused && return 0
+  if [ "${1:-}" = force ]; then rm -f "$RECOVERY/update-hold"
+  else
+    _hold=$(cat "$RECOVERY/update-hold" 2>/dev/null); case "$_hold" in ''|*[!0-9]*) _hold=0 ;; esac
+    [ "$_hold" -le "$(date +%s)" ] || return 0
+  fi
   iv=$(core_cfg_get $SHIELD hosts_interval_h 24)
   if [ "${1:-}" != force ]; then
     lt=$(prop_get "$META" last_ok 0)
@@ -400,7 +416,10 @@ hosts_update() {   # [force]
   # 上次更新被超时杀掉会留下锁：超过 10 分钟的锁视为残留
   _lk=$XG_RUN/shield-update.lock
   [ -d "$_lk" ] && [ $(( $(date +%s) - $(stat -c %Y "$_lk" 2>/dev/null || echo 0) )) -gt 600 ] && rmdir "$_lk" 2>/dev/null
-  lock_try shield-update || { log $SHIELD "已有更新在进行，跳过"; return 0; }
+  recovery_lock rules || return 1
+  lock_try shield-update || { log $SHIELD "已有更新在进行，跳过"; return 1; }
+  trap 'if [ "${recovery_lock_owned:-false}" = true ]; then rm -f "$recovery_lock_dir/pid"; rmdir "$recovery_lock_dir" 2>/dev/null; fi; rmdir "$XG_RUN/shield-update.lock" 2>/dev/null || :' EXIT
+  recovery_stage || { rm -rf "$recovery_stage_dir"; return 1; }
   now=$(date +%s); want=0
   for _i in $(active_ids); do
     case "$_i" in
@@ -420,13 +439,19 @@ hosts_update() {   # [force]
     [ $want -eq 0 ] && res=ok
   else res=fail; fi
   # 有没有缓存都重建一次（有源失败也用旧缓存）
-  hosts_build || { [ "$res" != fail ] && res=empty; }
+  if ! hosts_build; then recovery_restore_sources "$recovery_stage_dir/src"; res=fail; fi
+  if [ "$res" != fail ]; then
+    if ! recovery_commit; then
+      recovery_restore_sources "$recovery_stage_dir/src"; hosts_build
+      rm -rf "$recovery_stage_dir"; res=fail
+    fi
+  else rm -rf "$recovery_stage_dir"; fi
   last_ok=$(prop_get "$META" last_ok 0); [ "$res" = fail ] || last_ok=$now
   meta_set last_try "$now"; meta_set last_ok "$last_ok"; meta_set result "$res"; meta_set sources_ok "$got"; meta_set sources_want "$want"
   log $SHIELD "规则更新：$res（$got/$want 个源成功，hosts $(hosts_rules) 条）"
   lock_free shield-update
   [ "$res" != fail ]
-}
+)
 
 # 已启用的联网源里有没有从没下载成功过的（没有缓存）
 src_missing() {
@@ -443,6 +468,7 @@ src_missing() {
 # 状态写 $AD_DIR/auto.state（state=waiting_net|running|retry|done|gave_up next=<epoch> try=<n>），App 显示真实进度。
 AUTO_STATE=$AD_DIR/auto.state
 AUTO_PID=$XG_RUN/shield-auto.pid
+. "$XG_FDIR/recovery.sh"
 shield_net_up() {
   for _h in 223.5.5.5 119.29.29.29 1.1.1.1; do ping -c 1 -W 3 "$_h" >/dev/null 2>&1 && return 0; done
   ip route show table all 2>/dev/null | grep -q '^default ' && return 0
@@ -459,6 +485,7 @@ auto_running() {
 }
 # 后台启动（脱离 xguardd / feat_run 的超时进程组）；已有一个在跑就不重复起
 shield_kick_update() {   # [原因]
+  shield_paused && return 0
   [ "$(core_cfg_get $SHIELD hosts_interval_h 24)" = 0 ] && return 0
   auto_running && return 0
   mkdir -p "$XG_RUN"
@@ -568,6 +595,7 @@ guard_active() { iptables -w -C OUTPUT -j $GUARD_CHAIN 2>/dev/null; }
 # hosts：默认一直挂（proxy_yield=1 才在代理服务运行时撤）；HTTPDNS IP 拦截：代理服务运行时撤，避免和它的 iptables 打架
 reconcile() {
   feat_enabled "$SHIELD" || return 0
+  shield_paused && return 0
   if proxy_yield; then hosts_off; else hosts_on; fi
   if proxy_running; then guard_off
   elif guard_wanted; then guard_active || guard_on
@@ -739,7 +767,9 @@ splash_unlock_one() {   # <目标>
 
 splash_apply() (
   feat_enabled "$SHIELD" || return 0
+  shield_paused && return 0
   splash_mutex || return 1
+  feat_enabled "$SHIELD" && ! shield_paused || return 0
   _ll=$AD_DIR/locked.list.$$; : >"$_ll"
   splash_rules |
   while read -r pkg rel; do
@@ -769,7 +799,7 @@ splash_network_sync() {
   _uid=$(stat -c %u /data/user/0/com.xunlei.downloadprovider 2>/dev/null)
   case "$_uid" in ''|*[!0-9]*) _uid=0 ;; esac
   _wanted=0
-  if feat_enabled "$SHIELD" && ! skipped com.xunlei.downloadprovider && [ "$_uid" -ge 10000 ]; then _wanted=1; fi
+  if feat_enabled "$SHIELD" && ! shield_paused && ! skipped com.xunlei.downloadprovider && [ "$_uid" -ge 10000 ]; then _wanted=1; fi
   for _ipt in iptables ip6tables; do
     command -v "$_ipt" >/dev/null 2>&1 || continue
     if [ "$_wanted" = 0 ]; then
@@ -926,6 +956,7 @@ stats_json() {
 
 # 一行摘要（status.sh / xguard status 用）
 shield_summary() {
+  if shield_paused; then echo "临时暂停中，预计 $(pause_until) 恢复"; return; fi
   n=$(splash_locked_count); r=$(hosts_rules)
   sr=$(splash_rules | grep -c .)
   if [ "${sr:-0}" -eq 0 ]; then sp=""; else sp=" · 锁定 $n 个开屏"; fi

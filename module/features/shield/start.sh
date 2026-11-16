@@ -3,6 +3,7 @@
 #   后台拉起自动更新（等网络 + 重试，不阻塞开机）→ 锁开屏缓存，写 status.json
 . "$XG_FDIR/lib.sh"
 shield_migrate
+shield_paused && { shield_write_status '临时暂停中'; exit 0; }
 hosts_build        # 内置基线随模块分发：新装 / 升级后不联网也立即有规则
 reconcile          # 先用现有规则挂上（开机不等网络）
 shield_kick_update "${1:-service}"

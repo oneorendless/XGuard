@@ -1,4 +1,4 @@
-# XGuard 0.8.6 无 Root 版
+# XGuard 0.8.7 无 Root 版
 
 这个目录是在 XGuard 模块版 v0.8.3 基础上制作的无 Root 版本。WebView 页面、液态玻璃样式、导航和交互沿用模块版；网络层改为 Android `VpnService`，只接管发往本地 DNS 的 UDP 查询。项目基于原作者 **惜故里丶** 的原始作品进行二次创作，感谢原作者与各规则维护者，具体见仓库根目录的 `ACKNOWLEDGEMENTS.md`。
 
@@ -33,8 +33,8 @@ $env:XGUARD_KEY_PASS='签名密码'
 ./build-app.ps1 -AndroidSdk 'C:\Android\Sdk' -KeyStore 'C:\keys\xguard.jks'
 ```
 
-输出为 `XGuard-v0.8.6-no-root.apk`。无 Root 版使用包名 `com.xuan.xguard`、版本名 `0.8.6-noroot`，最低支持 Android 6.0；两个正式 APK 不能同时安装，切换前先备份所需设置。
+输出为 `XGuard-v0.8.7-no-root.apk`。无 Root 版使用包名 `com.xuan.xguard`、版本名 `0.8.7-noroot`，最低支持 Android 6.0；两个正式 APK 不能同时安装，切换前先备份所需设置。
 
-v0.8.6 完善统计环图、近期记录分布、日志弹窗与扫描深度、更新间隔选择样式。更新间隔仅保存偏好，规则仍需手动更新。开屏页明确标注缓存锁定需要 Root，不会将保存路径伪装为有效防护。详见 [更新记录](../docs/RELEASE-v0.8.6.md)。
+v0.8.7 新增暂停 5 分钟（保留 DNS 转发）、域名操作撤销、规则变化与回滚、VPN 健康检查和修复，并修复手动关闭通道的延迟。更新间隔仅保存偏好，规则仍需手动更新。开屏页明确标注缓存锁定需要 Root，不会将保存路径伪装为有效防护。详见 [更新记录](../docs/RELEASE-v0.8.7.md)。
 
 预构建 APK 与 `SHA256SUMS.txt` 可从仓库的 GitHub Releases 下载；源码目录不重复存放该 APK。自行构建请使用自己的签名密钥。

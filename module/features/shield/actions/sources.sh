@@ -6,6 +6,7 @@
 # xguard run shield sources reset                  恢复默认（默认开的内置源，清空自定义源）
 # xguard run shield sources interval <小时>        自动更新间隔，0=只手动，最大 720
 . "$XG_FDIR/lib.sh"
+case "${1:-}" in enable|disable|add|remove|reset|interval) recovery_lock rules || exit 1 ;; esac
 valid_url() { printf '%s' "$1" | grep -qE '^https?://[A-Za-z0-9._~:/?#@!$&()*+,;=%-]+$' && [ ${#1} -le 512 ]; }
 known_id() { cat_ids | grep -qx "$1"; }
 set_ids() { core_cfg_set $SHIELD sources "$1"; hosts_build; }

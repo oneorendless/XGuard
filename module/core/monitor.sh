@@ -19,6 +19,7 @@ start() {
   [ -f "$STATE/monitor.off" ] && return 0
   [ -f "$STATE/safe_mode" ] || [ -f "$STATE/conflict.shield" ] && return 0
   feat_enabled shield || return 0
+  [ ! -f "$XG_STATE/temporary-pause" ] || return 0
   abi=$(getprop ro.product.cpu.abi 2>/dev/null)
   case "$abi" in arm64-v8a|armeabi-v7a|x86|x86_64) ;; *)
     case "$(uname -m)" in aarch64) abi=arm64-v8a ;; arm*) abi=armeabi-v7a ;; x86_64) abi=x86_64 ;; i?86) abi=x86 ;; esac ;;
@@ -29,6 +30,7 @@ start() {
   mkdir "$lock" 2>/dev/null || return 0
   trap 'rmdir "$lock" 2>/dev/null' EXIT
   alive && return 0
+  feat_enabled shield && [ ! -f "$XG_STATE/temporary-pause" ] || return 0
   rm -f "$ERR" "$SNAP"
   nohup "$binary" -output "$SNAP" -hosts "$XG_DATA/shield/hosts" </dev/null >"$ERR" 2>&1 &
   echo $! >"$PIDFILE"

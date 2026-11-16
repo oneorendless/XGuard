@@ -4,9 +4,9 @@ Android 广告域名防护工具，提供 **Root 模块版**和**免 Root 本地
 
 二次创作与维护：**Xuan**。本项目基于原作者 **惜故里丶** 的原始作品进行整理和改进，感谢原作者的工作；原有规则与第三方项目的署名继续保留。
 
-**[下载 v0.8.6 安装包](https://github.com/oneorendless/XGuard/releases/tag/v0.8.6) · [全部版本](https://github.com/oneorendless/XGuard/releases) · [致谢与来源](ACKNOWLEDGEMENTS.md)**
+**[下载 v0.8.7 安装包](https://github.com/oneorendless/XGuard/releases/tag/v0.8.7) · [全部版本](https://github.com/oneorendless/XGuard/releases) · [致谢与来源](ACKNOWLEDGEMENTS.md)**
 
-**v0.8.6** 完善统计环图、HOSTS 状态与近期记录分布，加快首页状态读取，统一日志、扫描深度和更新间隔弹窗。详见 [更新日志](docs/RELEASE-v0.8.6.md)。
+**v0.8.7** 增加 5 分钟临时暂停、最近域名操作撤销、规则更新差异与回滚，以及实际运行健康检查和修复。详见 [更新日志](docs/RELEASE-v0.8.7.md)。
 
 ## 两个版本怎么选
 
@@ -44,18 +44,18 @@ Android 广告域名防护工具，提供 **Root 模块版**和**免 Root 本地
 
 安装步骤：
 
-1. 下载 **[XGuard-v0.8.6-module.zip](https://github.com/oneorendless/XGuard/releases/download/v0.8.6/XGuard-v0.8.6-module.zip)**。
+1. 下载 **[XGuard-v0.8.7-module.zip](https://github.com/oneorendless/XGuard/releases/download/v0.8.7/XGuard-v0.8.7-module.zip)**。
 2. 在 Magisk / KernelSU / SukiSU / APatch 管理器中从本地安装模块，完成后重启。
 3. 打开 XGuard，点击“授权并连接”，在 Root 管理器中授予权限。
 4. 按需选择来源并更新规则。其他修改 hosts 的模块可能产生冲突，请避免重复启用。
 
-模块会安装配套应用；如需手动补装，下载 [模块版配套 APK](https://github.com/oneorendless/XGuard/releases/download/v0.8.6/XGuard-v0.8.6-root.apk)。该 APK 是模块的管理界面，单独安装不能替代模块。
+模块会安装配套应用；如需手动补装，下载 [模块版配套 APK](https://github.com/oneorendless/XGuard/releases/download/v0.8.7/XGuard-v0.8.7-root.apk)。该 APK 是模块的管理界面，单独安装不能替代模块。
 
 ## 免 Root 版
 
 免 Root 版通过 Android `VpnService` 处理本地 DNS 请求，不需要 Root，也不修改系统 hosts。
 
-1. 下载并安装 **[XGuard-v0.8.6-no-root.apk](https://github.com/oneorendless/XGuard/releases/download/v0.8.6/XGuard-v0.8.6-no-root.apk)**。
+1. 下载并安装 **[XGuard-v0.8.7-no-root.apk](https://github.com/oneorendless/XGuard/releases/download/v0.8.7/XGuard-v0.8.7-no-root.apk)**。
 2. 打开应用，点击“授权并连接”，同意系统 VPN 授权。
 3. 在“规则”页勾选预制来源，返回概览点击“更新规则”，下载完成后合并加载。
 4. 根据系统提示允许通知，将电量策略设为“不受限制”，开启厂商自启动；必要时在最近任务中手动锁定应用。各项系统开关需自行设置。
@@ -79,10 +79,10 @@ Android 广告域名防护工具，提供 **Root 模块版**和**免 Root 本地
 
 | Release 文件 | 用途 |
 | --- | --- |
-| `XGuard-v0.8.6-module.zip` | 可刷入的 Root 模块安装包 |
-| `XGuard-v0.8.6-root.apk` | 模块版配套管理应用 |
-| `XGuard-v0.8.6-no-root.apk` | 可独立安装的免 Root 应用 |
-| `XGuard-v0.8.6-source.zip` | 包含模块与免 Root 版的源码快照，不能刷入 |
+| `XGuard-v0.8.7-module.zip` | 可刷入的 Root 模块安装包 |
+| `XGuard-v0.8.7-root.apk` | 模块版配套管理应用 |
+| `XGuard-v0.8.7-no-root.apk` | 可独立安装的免 Root 应用 |
+| `XGuard-v0.8.7-source.zip` | 包含模块与免 Root 版的源码快照，不能刷入 |
 | `SHA256SUMS.txt` | 上述文件的 SHA-256 校验值 |
 
 GitHub 自动生成的 `Source code (zip)` / `Source code (tar.gz)` 也是源码归档，**不是模块刷机包**。

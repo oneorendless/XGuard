@@ -30,9 +30,10 @@ json_status() {
   sm=$(sed -n 's/^  "summary": "\(.*\)",\{0,1\}$/\1/p' "$XG_DATA/shield/status.json" 2>/dev/null | head -n1)
   [ -n "$sm" ] || sm=$(XG_FEATURE=shield XG_FDIR=$XG_FEATURES/shield bb timeout 5 sh "$XG_FEATURES/shield/status.sh" 2>/dev/null | head -n1 | sed 's/"/\\"/g')
   health=$(feat_health_state shield | sed 's/\\/\\\\/g; s/"/\\"/g')
-  printf '{"version":"%s","root":"%s","safe_mode":%s,"daemon":"%s","app_install":"","features":[{"id":"shield","name":"%s","icon":"%s","enabled":%s,"conflict":"%s","conflict_reason":"%s","summary":"%s","health":"%s"}]}\n' \
+  pause_until=$(cat "$XG_STATE/temporary-pause" 2>/dev/null); case "$pause_until" in ''|*[!0-9]*) pause_until=0 ;; esac
+  printf '{"version":"%s","root":"%s","safe_mode":%s,"daemon":"%s","app_install":"","features":[{"id":"shield","name":"%s","icon":"%s","enabled":%s,"conflict":"%s","conflict_reason":"%s","summary":"%s","health":"%s","pause_until":%s}]}\n' \
     "$(prop_get "$XG_MODDIR/module.prop" version)" "$XG_ROOT" "$([ -f "$XG_STATE/safe_mode" ] && echo true || echo false)" \
-    "$(sh "$XG_MODDIR/core/xguardd.sh" status | cut -d' ' -f1)" "$(feat_meta shield name)" "$(feat_meta shield icon shield-check)" "$en" "$cf" "$cw" "$sm" "$health"
+    "$(sh "$XG_MODDIR/core/xguardd.sh" status | cut -d' ' -f1)" "$(feat_meta shield name)" "$(feat_meta shield icon shield-check)" "$en" "$cf" "$cw" "$sm" "$health" "$pause_until"
 }
 
 case "${1:-}" in
@@ -42,6 +43,10 @@ case "${1:-}" in
     [ -f "$XG_STATE/conflict.shield" ] && st="conflict($(cat "$XG_STATE/conflict.shield"))"
     printf '%-10s %-14s %s\n' shield "$st" "$(feat_meta shield name)" ;;
   enable|disable)
+    XG_FDIR=$XG_FEATURES/shield; export XG_FDIR
+    . "$XG_FDIR/lib.sh"
+    recovery_lock control || exit 1
+    rm -f "$XG_STATE/temporary-pause"
     [ "${2:-shield}" = shield ] || { echo "无此插件：$2"; exit 1; }
     if [ "$1" = enable ]; then
       sh "$XG_MODDIR/core/conflict.sh"
