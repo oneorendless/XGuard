@@ -17,9 +17,11 @@ let pending = false;
 let activityTimer;
 let activityLoading = false;
 let activityPayload = null;
+let activityError = '';
 let activityFilter = 'all';
 let activitySignature = '';
 let dataRevision = 0;
+let refreshSequence = 0;
 let domainLoadSequence = 0;
 const tabLoads = new Map();
 const tabLoadedAt = new Map();
@@ -84,9 +86,13 @@ function validDomain(value, wildcard = false) { const domain = wildcard ? value.
 function domainValue(wildcard = false) { const value = element('domain').value.trim().toLowerCase(); if (!validDomain(value, wildcard)) throw new Error('请输入有效域名'); return value; }
 
 async function refresh() {
-  const results = await Promise.allSettled([json(exec(['status'])), json(run('stats'))]);
-  if (results[0].status === 'rejected') { element('connection').textContent = results[0].reason.message; element('toggle').disabled = true; return; }
-  status = results[0].value;
+  const request = ++refreshSequence;
+  const statsRequest = json(run('stats', 'quick')).then(value => ({value}), error => ({error}));
+  let nextStatus;
+  try { nextStatus = await json(exec(['status'])); }
+  catch (error) { if (request !== refreshSequence) return; status = null; element('connection').textContent = error.message; element('toggle').disabled = true; element('traffic-state').textContent = '连接失败'; return; }
+  if (request !== refreshSequence) return;
+  status = nextStatus;
   const feature = status.features[0];
   element('toggle').disabled = false; element('toggle').setAttribute('aria-checked', String(feature.enabled));
   element('protection-title').textContent = status.safe_mode ? '安全模式' : feature.enabled ? '防护已开启' : '防护已暂停';
@@ -97,17 +103,20 @@ async function refresh() {
   element('runtime').textContent = (noRoot ? '运行方式：' : 'Root：') + status.root + ' · 服务：' + status.daemon;
   element('version').textContent = status.version;
   element('header-version').textContent = String(status.version).replace(/^v/, '');
-  if (results[1].status === 'fulfilled') {
-    stats = results[1].value;
+  if (activeTab === 'home' || activeTab === 'activity') void loadActivity();
+  const result = await statsRequest;
+  if (request !== refreshSequence) return;
+  if (!result.error) {
+    stats = result.value;
     const modes = { hosts: 'HOSTS 生效', proxy: '代理服务接管', 'dns-vpn': '本地 VPN DNS 拦截', off: '尚未生效' };
     element('mode').textContent = feature.enabled ? (modes[stats.mode] || stats.mode) : '防护关闭';
-    element('rule-count').textContent = number(stats.hosts_rules); element('locked-count').textContent = isVpnMode() ? '需 Root' : number(stats.splash_locked_apps); element('source-count').textContent = number(stats.sources);
-    element('splash-metric-detail').textContent = isVpnMode() ? 'DNS 防护不锁缓存' : '已实际锁定应用';
+    element('rule-count').textContent = number(stats.hosts_rules); element('locked-count').textContent = isVpnMode() ? '需 Root' : stats.splash_locked_apps == null ? '—' : number(stats.splash_locked_apps); element('source-count').textContent = number(stats.sources);
+    element('splash-metric-detail').textContent = isVpnMode() ? 'DNS 防护不锁缓存' : stats.locked_count_cached ? '最近核验锁定应用' : '已实际锁定应用';
     element('update-info').textContent = (stats.updating ? '正在更新 · ' : '') + '上次更新：' + age(stats.last_ok) + (stats.capped ? ' · 已达到规则上限' : '');
     element('guard').checked = Boolean(Number(stats.guard)); element('proxy-yield').checked = Boolean(Number(stats.proxy_yield)); element('hide').checked = Boolean(Number(stats.hide)); element('mount-mode').value = stats.mount_mode || 'auto'; element('max-rules').value = stats.hosts_max;
-  } else { element('update-info').textContent = '规则状态读取失败：' + results[1].reason.message; }
+  } else { element('update-info').textContent = '规则状态读取失败：' + result.error.message; }
+  renderTrafficStats();
   tabLoadedAt.clear();
-  if (activeTab === 'home') void loadActivity();
   await loadTab(true);
 }
 function loadTab(force = false) {
@@ -161,31 +170,69 @@ function renderActivity(force = false) {
 async function loadActivity() {
   if (activityLoading) return; activityLoading = true;
   const revision = dataRevision;
-  try { const payload = await json(run('activity')); if (revision !== dataRevision) return; activityPayload = payload; renderTrafficStats(); if (activeTab === 'activity') renderActivity(); }
-  catch (error) { element('monitor-state').textContent = '读取采集失败'; element('monitor-detail').textContent = error.message || String(error); element('monitor-dot').classList.remove('active'); }
+  try { const payload = await json(run('activity')); if (revision !== dataRevision) return; activityPayload = payload; activityError = ''; renderTrafficStats(); if (activeTab === 'activity') renderActivity(); }
+  catch (error) { if (revision !== dataRevision) return; activityError = error.message || String(error); renderTrafficStats(); element('monitor-state').textContent = '读取采集失败'; element('monitor-detail').textContent = activityError; element('monitor-dot').classList.remove('active'); }
   finally { activityLoading = false; }
 }
 function renderTrafficStats() {
   const vpn = isVpnMode(); const snapshot = activityPayload?.snapshot || {};
   const total = Number(vpn ? snapshot.totals?.queries || 0 : snapshot.observed || 0);
   const blocked = Number(vpn ? snapshot.totals?.blocked || 0 : snapshot.matched || 0);
-  const percent = total ? blocked / total * 100 : 0;
-  element('traffic-title').textContent = vpn ? '拦截统计' : '网络观察统计';
+  const percent = total ? Math.min(100, Math.max(0, blocked / total * 100)) : 0;
+  element('traffic-title').textContent = vpn ? '拦截统计' : '防护统计';
   element('traffic-total-label').textContent = vpn ? 'DNS 请求' : '观察记录';
   element('traffic-blocked-label').textContent = vpn ? '已拦截' : '规则命中';
   element('traffic-ratio-label').textContent = vpn ? '拦截比例' : '命中比例';
-  element('traffic-total').textContent = number(total); element('traffic-blocked').textContent = number(blocked);
-  element('traffic-ratio').textContent = percent.toFixed(1) + '%'; element('traffic-progress').value = percent;
+  element('traffic-total').textContent = activityPayload ? number(total) : '—'; element('traffic-blocked').textContent = activityPayload ? number(blocked) : '—';
+  element('traffic-ratio').textContent = activityPayload ? percent.toFixed(1) + '%' : '—'; element('traffic-progress').value = percent;
   element('traffic-note').textContent = vpn ? '累计自 ' + age(snapshot.totals?.started) + ' · 失败 ' + number(snapshot.totals?.failed) + ' 次。清空域名记录不重置计数。' : '本次采集期间的去重 DNS / TLS 观察记录；规则命中不等于实际拦截，hosts 提前阻断的请求无法计数。';
-  element('traffic-state').textContent = activityPayload?.collector?.running ? '实时更新' : activityPayload?.collector?.enabled === false ? '采集已暂停' : '等待服务';
+  const collector = activityPayload?.collector;
+  const fresh = vpn || Date.now() / 1000 - Number(snapshot.updated || 0) < 12;
+  element('traffic-state').textContent = activityError ? '统计读取失败' : collector?.enabled === false ? '采集已暂停' : collector?.running ? fresh ? '实时更新' : '数据未更新' : '等待服务';
+  element('traffic-arc').setAttribute('stroke-dasharray', percent + ' ' + (100 - percent));
+  element('traffic-arc').setAttribute('visibility', percent > 0 ? 'visible' : 'hidden');
+  element('traffic-donut').setAttribute('aria-label', (vpn ? '拦截比例 ' : '规则命中比例 ') + percent.toFixed(1) + '%');
+  element('traffic-progress').setAttribute('aria-label', vpn ? '拦截比例' : '命中比例');
+  element('hosts-stats').hidden = vpn;
+  element('hosts-rule-count').textContent = stats ? number(stats.hosts_rules) : '—';
+  const hostsActive = status?.features?.[0]?.enabled && stats?.mode === 'hosts';
+  element('hosts-state').textContent = !status || !stats ? '正在读取' : !status.features[0].enabled ? '防护已暂停' : stats.mode === 'proxy' ? '代理接管' : hostsActive ? '已挂载' : '尚未挂载';
+  element('hosts-state').classList.toggle('active', Boolean(hostsActive));
+  element('hosts-matched-domains').textContent = activityPayload ? number(new Set((snapshot.items || []).filter(item => item.rule_blocked).map(item => item.domain)).size) : '—';
+  renderRecentTraffic(snapshot, vpn);
+}
+function renderRecentTraffic(snapshot, vpn) {
+  const now = Math.floor(Date.now() / 60000), buckets = Array.from({length:12}, () => ({total:0, matched:0}));
+  const ranked = new Map(), items = snapshot.items || [];
+  for (const item of items) {
+    if (!validDomain(item.domain || '') || !['dns','tls'].includes(item.source)) continue;
+    const index = Math.floor(Number(item.time) / 60) - now + 11;
+    if (index >= 0 && index < 12) { buckets[index].total++; if (item.rule_blocked) buckets[index].matched++; }
+    if (item.rule_blocked) ranked.set(item.domain, (ranked.get(item.domain) || 0) + 1);
+  }
+  const maximum = Math.max(1, ...buckets.map(bucket => bucket.total));
+  const ns = 'http://www.w3.org/2000/svg', chart = element('traffic-chart'); chart.replaceChildren();
+  buckets.forEach((bucket, index) => {
+    for (const [count, kind] of [[bucket.total, 'chart-observed'], [bucket.matched, 'chart-matched']]) {
+      const bar = document.createElementNS(ns, 'rect'), height = count / maximum * 76;
+      for (const [key, value] of Object.entries({x:index * 24 + 4, y:84 - height, width:16, height, rx:3, class:kind})) bar.setAttribute(key, value);
+      const title = document.createElementNS(ns, 'title'); title.textContent = (11 - index) + ' 分钟前：' + bucket.total + ' 条记录，' + bucket.matched + (vpn ? ' 条拦截' : ' 条命中'); bar.append(title); chart.append(bar);
+    }
+  });
+  chart.setAttribute('aria-label', '近 12 分钟最近记录分布，共 ' + buckets.reduce((sum, bucket) => sum + bucket.total, 0) + ' 条，其中 ' + buckets.reduce((sum, bucket) => sum + bucket.matched, 0) + (vpn ? ' 条拦截' : ' 条规则命中'));
+  element('chart-matched-label').textContent = vpn ? '拦截' : '命中';
+  element('traffic-chart-note').textContent = '仅展示保留的最近 ' + number(items.length) + ' 条域名记录；图表与排行并非全量请求统计。';
+  element('traffic-top-title').textContent = vpn ? '近期拦截域名' : '近期规则命中域名';
+  const top = [...ranked].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 5);
+  fill('traffic-top', top.map(([domain, count]) => row(domain, number(count) + (vpn ? ' 条拦截记录' : ' 条规则匹配记录'))), vpn ? '近期暂无拦截记录' : '近期暂无可见规则命中');
 }
 async function changeDomain(kind, domain) {
   requireEnabled(); await run(kind, 'add', domain);
   const result = await json(run('query', domain));
   if (kind === 'block' && !result.blocked) throw new Error('域名没有写入封禁规则，请检查放行名单或保护名单');
   toast(kind === 'allow' ? '已放行此域名' : '已加入封禁规则，新连接生效');
-  for (const item of activityPayload?.snapshot?.items || []) if (item.domain === domain) item.rule_blocked = kind === 'block';
-  renderActivity(true); await loadDomains();
+  if (!isVpnMode()) for (const item of activityPayload?.snapshot?.items || []) if (item.domain === domain) item.rule_blocked = kind === 'block';
+  renderActivity(true); renderTrafficStats(); await loadDomains();
 }
 function switchPage(id) {
   if (activeTab === id) return;
@@ -209,7 +256,7 @@ async function loadSources() {
   }));
   const interval = String(sources.interval_h ?? 24);
   if (!Array.from(element('interval').options).some(option => option.value === interval)) { const option = document.createElement('option'); option.value = interval; option.textContent = '每 ' + interval + ' 小时'; element('interval').append(option); }
-  element('interval').value = interval;
+  element('interval').value = interval; syncUpdateInterval(); element('interval-open').disabled = false;
   element('auto-info').textContent = '后台状态：' + (stats?.auto_state || '待命') + ' · 下次：' + age(stats?.auto_next);
   fill('custom-sources', list.filter(source => source.custom).map(source => row(source.url, number(source.count) + ' 条 · ' + (source.err || source.result), button('删除', async () => { requireEnabled(); await run('sources', 'remove', source.url); await refresh(); }))), '尚未添加自定义来源');
 }
@@ -274,7 +321,8 @@ function renderSplash() {
   }), '没有自定义开屏规则，可从上方应用选择添加');
   const actual = new Set(hitRules.filter(rule => rule.state === 'locked').map(rule => rule.pkg)).size;
   element('locked-count').textContent = number(actual);
-  if (stats) stats.splash_locked_apps = actual;
+  element('splash-metric-detail').textContent = '已实际锁定应用';
+  if (stats) { stats.splash_locked_apps = actual; stats.locked_count_cached = false; }
 }
 function renderHits() {
   const grouped = new Map(); const filter = element('filter-apps').value.toLowerCase();
@@ -312,7 +360,36 @@ element('test').onclick = () => task(async () => {
 }, element('test'));
 element('query-domain').onclick = () => task(async () => { const result = await json(run('query', domainValue())); element('domain-result').textContent = result.allowed ? '当前已放行' : result.blocked ? '当前已封禁' : result.in_source ? '命中规则源，当前拦截' : '未命中规则'; });
 for (const kind of ['allow', 'block']) element(kind + '-domain').onclick = () => task(async () => { const value = domainValue(kind === 'allow'); if (value.startsWith('*.')) { requireEnabled(); await run(kind, 'add', value); toast('通配放行已保存'); await loadDomains(); } else await changeDomain(kind, value); }, element(kind + '-domain'));
-element('interval').onchange = () => task(async () => { await run('sources', 'interval', element('interval').value); toast('更新间隔已保存'); await loadSources(); });
+let intervalDraft = '24';
+function syncUpdateInterval() {
+  const option = element('interval').selectedOptions[0];
+  element('interval-label').textContent = option?.textContent || '尚未读取';
+  element('interval-hint').textContent = isVpnMode() ? '当前仅保存偏好，规则需手动更新' : element('interval').value === '0' ? '需要时手动同步规则' : '后台定期检查并同步规则';
+}
+function renderIntervalOptions() {
+  element('interval-options').replaceChildren(...Array.from(element('interval').options, option => {
+    const control = document.createElement('button'); control.className = 'interval-option';
+    control.dataset.interval = option.value; control.setAttribute('aria-pressed', String(option.value === intervalDraft));
+    const label = document.createElement('b'); label.textContent = option.textContent;
+    const hint = document.createElement('small'); hint.textContent = ({0:'自行决定更新时间',6:'较频繁地同步',12:'每天检查两次',24:'日常使用推荐',48:'减少后台更新',168:'适合低频更新'})[option.value] || '保留当前自定义间隔';
+    control.append(label, hint); control.onclick = () => { intervalDraft = option.value; renderIntervalOptions(); element('interval-options').querySelector('[data-interval="' + intervalDraft + '"]').focus(); };
+    return control;
+  }));
+}
+element('interval-open').onclick = () => {
+  intervalDraft = element('interval').value; renderIntervalOptions(); element('interval-state').textContent = '';
+  element('interval-note').textContent = isVpnMode() ? '免 Root 版暂未接入后台定时下载。选择仅保存偏好，更新规则仍需手动。' : '后台按所选间隔检查规则源，网络不可用时稍后重试。';
+  element('interval-dialog').showModal();
+};
+element('interval-cancel').onclick = () => element('interval-dialog').close();
+element('interval-save').onclick = () => task(async () => {
+  const value = intervalDraft;
+  element('interval-state').textContent = '正在保存…';
+  try {
+    await run('sources', 'interval', value); element('interval').value = value; syncUpdateInterval();
+    element('interval-dialog').close(); toast(isVpnMode() ? '间隔偏好已保存，规则仍需手动更新' : '更新间隔已保存'); await loadSources();
+  } catch (error) { element('interval-state').textContent = '保存失败：' + error.message; }
+}, element('interval-save'));
 element('add-source').onclick = () => task(async () => { requireEnabled(); const url = element('source-url').value.trim(); if (!/^https?:\/\/\S+$/.test(url)) throw new Error('地址需要以 http:// 或 https:// 开头'); await run('sources', 'add', url); element('source-url').value = ''; toast('已添加，更新规则后下载'); await refresh(); });
 element('reset-sources').onclick = () => task(async () => { requireEnabled(); if (await confirmAction('恢复默认来源', '恢复默认内置来源并清空自定义来源。')) { await run('sources', 'reset'); await refresh(); } });
 element('filter-apps').oninput = renderHits;
@@ -333,17 +410,36 @@ element('guard').onchange = () => task(async () => { requireEnabled(); if (eleme
 for (const [id, key] of [['proxy-yield', 'proxy_yield'], ['hide', 'hide']]) element(id).onchange = () => task(async () => { requireEnabled(); await run('set', key, element(id).checked ? '1' : '0'); toast(key === 'hide' ? '已保存，重启后完全生效' : '已保存'); await refresh(); });
 element('mount-mode').onchange = () => task(async () => { requireEnabled(); await run('set', 'mount_mode', element('mount-mode').value); await refresh(); });
 element('save-max').onclick = () => task(async () => { requireEnabled(); await run('set', 'hosts_max', element('max-rules').value); toast('规则上限已保存'); await refresh(); });
-element('logs').onclick = () => task(async () => { const [featureLog, suiteLog] = await Promise.all([exec(['log']), run('stats')]); element('log-output').hidden = false; element('log-output').textContent = (featureLog || '暂无日志') + '\n\n' + suiteLog; });
+element('logs').onclick = () => task(async () => {
+  const dialog = element('logs-dialog'), output = element('log-output');
+  output.hidden = true; output.textContent = ''; element('logs-state').textContent = '正在读取日志…'; dialog.showModal();
+  const sections = ['', '', ''];
+  await Promise.all([['核心日志', () => exec(['log'])], ['防护日志', () => exec(['log', 'shield'])], ['运行状态', () => run('stats', 'quick')]].map(async ([title, read], index) => {
+    try { const text = await read(); sections[index] = '【' + title + '】\n' + (text.trim() || '暂无日志'); }
+    catch (error) { sections[index] = '【' + title + '】读取失败：' + error.message; }
+    output.textContent = sections.filter(Boolean).join('\n\n'); output.hidden = false;
+  }));
+  element('logs-state').textContent = '读取完成，可关闭窗口返回设置。';
+}, element('logs'));
 element('safe-mode').onclick = () => task(async () => { const enabled = !status.safe_mode; if (await confirmAction(enabled ? '开启安全模式' : '关闭安全模式', '重启手机后生效。')) { await exec(['safe', enabled ? 'on' : 'off']); toast('已保存，请重启手机'); await refresh(); } });
 element('activity-open').onclick = () => switchPage('activity');
 element('activity-refresh').onclick = () => task(loadActivity, element('activity-refresh'));
-element('activity-clear').onclick = () => task(async () => { if (await confirmAction('清空域名记录', '清空最近观察到的域名，防护规则会保留。')) { activityPayload = await json(run('activity', 'clear')); renderActivity(true); } }, element('activity-clear'));
-element('monitor-toggle').onclick = () => task(async () => { activityPayload = await json(run('activity', activityPayload?.collector?.enabled === false ? 'enable' : 'disable')); renderActivity(true); }, element('monitor-toggle'));
+element('activity-clear').onclick = () => task(async () => { if (await confirmAction('清空域名记录', '清空最近观察到的域名，防护规则会保留。')) { activityPayload = await json(run('activity', 'clear')); renderActivity(true); renderTrafficStats(); } }, element('activity-clear'));
+element('monitor-toggle').onclick = () => task(async () => { activityPayload = await json(run('activity', activityPayload?.collector?.enabled === false ? 'enable' : 'disable')); renderActivity(true); renderTrafficStats(); }, element('monitor-toggle'));
 element('activity-search').oninput = () => renderActivity(true);
 document.querySelectorAll('[data-filter]').forEach(control => { control.onclick = () => { activityFilter = control.dataset.filter; document.querySelectorAll('[data-filter]').forEach(button => button.setAttribute('aria-selected', String(button === control))); renderActivity(true); }; });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && activeTab === 'activity' && !pending) loadActivity(); });
 element('show-license').onclick = () => element('license-dialog').showModal();
 element('show-donate').onclick = () => element('donate-dialog').showModal();
+const depthOptions = {6:['快速扫描 · 6 层', '先查找常见位置，耗时较少'], 8:['标准扫描 · 8 层', '兼顾扫描耗时与目录覆盖'], 12:['深入扫描 · 12 层', '查找更深目录，可能需要更久']};
+function syncScanDepth() {
+  const depth = element('scan-depth').value, [label, hint] = depthOptions[depth] || depthOptions[8];
+  element('scan-depth-label').textContent = label; element('scan-depth-hint').textContent = hint;
+  document.querySelectorAll('[data-depth]').forEach(control => control.setAttribute('aria-pressed', String(control.dataset.depth === depth)));
+}
+element('scan-depth').onchange = syncScanDepth;
+element('scan-depth-open').onclick = () => { syncScanDepth(); element('scan-depth-dialog').showModal(); };
+document.querySelectorAll('[data-depth]').forEach(control => { control.onclick = () => { element('scan-depth').value = control.dataset.depth; syncScanDepth(); element('scan-depth-dialog').close(); }; });
 element('display-theme').value = window.XGuardTheme?.preference || 'system';
 element('display-theme').onchange = () => window.XGuardTheme?.set(element('display-theme').value);
 if (noRoot) {
@@ -394,4 +490,4 @@ for (const dialog of document.querySelectorAll('dialog')) {
 }
 if (window.XGuard && !rootReady) { element('root-dialog').showModal(); element('connection').textContent = noRoot ? '等待授予本地 VPN 权限' : '等待授予 Root 权限'; }
 else if (noRoot && window.XGuard.isVpnPrepared && !window.XGuard.isVpnPrepared()) { element('root-dialog').showModal(); element('connection').textContent = '点击开启本地 VPN 防护'; }
-else task(refresh);
+else void refresh().catch(error => toast(error.message));

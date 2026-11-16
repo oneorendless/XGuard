@@ -885,12 +885,24 @@ sources_json() {
 # interval_h / splash_* / url / sources(数量) / sources_ok / user_rules / allow_count / block_count）
 stats_json() {
   mode=$(shield_mode)
-  locked=$(splash_locked_count)
+  locked_cached=false; locked_checked=0
+  if [ "${1:-}" = quick ]; then
+    locked=$(core_json_get "$AD_DIR/status.json" splash_locked_apps)
+    case "$locked" in ''|*[!0-9]*) locked=null ;; esac
+    locked_checked=$(core_json_get "$AD_DIR/status.json" updated_at)
+    case "$locked_checked" in ''|*[!0-9]*) locked_checked=0 ;; esac
+    locked_cached=true
+  else
+    locked=$(splash_locked_count)
+  fi
   skip=$(cnt_lines "$SKIP")
   user_rules=$(cnt_lines "$USER_RULES"); allow_n=$(cnt_lines "$ALLOW"); block_n=$(cnt_lines "$BLOCK")
   ids=$(active_ids); srcs=$(echo $ids | wc -w)
-  urls=""; for _i in $ids; do case "$_i" in custom_*) ;; *) is_builtin "$_i" || urls="$urls $(cat_field "$_i" 5 | cut -d' ' -f1)" ;; esac; done
-  urls="${urls# }$(custom_urls | tr '\n' ' ' | sed 's/^/ /; s/ *$//')"
+  urls=""
+  if [ "${1:-}" != quick ]; then
+    for _i in $ids; do case "$_i" in custom_*) ;; *) is_builtin "$_i" || urls="$urls $(cat_field "$_i" 5 | cut -d' ' -f1)" ;; esac; done
+    urls="${urls# }$(custom_urls | tr '\n' ' ' | sed 's/^/ /; s/ *$//')"
+  fi
   tv=$(sed -n 's/.*"verdict":"\([^"]*\)".*/\1/p' "$TEST_JSON" 2>/dev/null)
   tt=$(sed -n 's/.*"time":\([0-9]*\).*/\1/p' "$TEST_JSON" 2>/dev/null)
   upd=false; [ -d "$XG_RUN/shield-update.lock" ] && upd=true
@@ -907,7 +919,8 @@ stats_json() {
   _as=$(prop_get "$AUTO_STATE" state ""); auto_running || case "$_as" in waiting_net|running|retry) _as=stopped ;; esac
   printf '"catalog":%s,"builtin_allow":%s,"auto_state":"%s","auto_next":%s,"auto_try":%s,"source_list":' \
     "$(cat_ids | grep -c .)" "$(cnt_lines "$BUILTIN_ALLOW")" "$_as" "$(prop_get "$AUTO_STATE" next 0)" "$(prop_get "$AUTO_STATE" try 0)"
-  sources_json
+  if [ "${1:-}" = quick ]; then printf '[]'; else sources_json; fi
+  printf ',"locked_count_cached":%s,"locked_checked_at":%s' "$locked_cached" "$locked_checked"
   printf '}\n'
 }
 

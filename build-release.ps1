@@ -1,4 +1,4 @@
-param([string]$OutputFile=(Join-Path $PSScriptRoot '../XGuard-v0.8.5.zip'),[Parameter(Mandatory=$true)][string]$Tools)
+param([string]$OutputFile=(Join-Path $PSScriptRoot './dist/XGuard-v0.8.6-module.zip'),[Parameter(Mandatory=$true)][string]$Tools)
 $ErrorActionPreference='Stop'
 $module=Join-Path $PSScriptRoot 'module'
 $apk=Join-Path $module 'app/xguard.apk'
@@ -11,7 +11,7 @@ $badging=& (Join-Path $Tools 'aapt.exe') dump badging (Join-Path $temporary 'XGu
 if($LASTEXITCODE -ne 0 -or $badging -notcontains "application-label:'XGuard'"){throw '模块内携带的 APK 不是 XGuard'}
 if(($badging -join "`n") -notmatch "package: name='com.xuan.xguard'"){throw '模块内携带的 APK 包名错误'}
 if((Get-Content (Join-Path $module 'module.prop')) -notcontains 'id=xguard'){throw '模块 ID 错误'}
-if(($badging -join "`n") -notmatch "versionCode='8005' versionName='0.8.5'"){throw '模块内携带的 APK 版本错误'}
+if(($badging -join "`n") -notmatch "versionCode='8006' versionName='0.8.6'"){throw '模块内携带的 APK 版本错误'}
 & (Join-Path $Tools 'apksigner.bat') verify (Join-Path $temporary 'XGuard.apk')
 if($LASTEXITCODE -ne 0){throw 'APK 签名校验失败'}
 $apkZip=[IO.Compression.ZipFile]::OpenRead($apk)

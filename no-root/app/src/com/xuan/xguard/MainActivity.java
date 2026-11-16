@@ -237,6 +237,10 @@ public final class MainActivity extends Activity {
             String command = values.getString(0);
             if ("apps".equals(command)) return AppCatalog.describe(MainActivity.this, values);
             if ("status".equals(command)) return statusJson();
+            if ("log".equals(command)) {
+                if (values.length() > 1 && "shield".equals(values.getString(1))) return "最近 DNS 记录（仅保留已开启采集时的记录）\n" + XGuardVpnService.activityJson(MainActivity.this).getJSONObject("snapshot").getJSONArray("items").toString(2);
+                return "本地 VPN 运行状态（免 Root 版不读取系统日志）\n" + new JSONObject(statusJson()).toString(2) + "\n累计 DNS 计数\n" + XGuardVpnService.activityJson(MainActivity.this).getJSONObject("snapshot").getJSONObject("totals").toString(2);
+            }
             if ("enable".equals(command)) { startVpnService(); return ""; }
             if ("disable".equals(command)) { stopVpnService(); return ""; }
             if ("safe".equals(command)) return "";
@@ -261,7 +265,7 @@ public final class MainActivity extends Activity {
         private String statusJson() throws Exception {
             boolean enabled = getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("enabled", false) && XGuardVpnService.isRunning();
             JSONObject feature = new JSONObject(); feature.put("enabled", enabled); feature.put("conflict", false); feature.put("health", enabled ? "ok" : "off"); feature.put("summary", enabled ? "本地 VPN 正在拦截广告域名" : "点击开关开启本地 VPN 防护");
-            JSONObject result = new JSONObject(); result.put("root", "无 Root · Android VPN"); result.put("daemon", enabled ? "前台服务运行中" : "未启动"); result.put("safe_mode", false); result.put("version", "0.8.5"); result.put("features", new JSONArray().put(feature));
+            JSONObject result = new JSONObject(); result.put("root", "无 Root · Android VPN"); result.put("daemon", enabled ? "前台服务运行中" : "未启动"); result.put("safe_mode", false); result.put("version", "0.8.6"); result.put("features", new JSONArray().put(feature));
             return result.toString();
         }
         private String statsJson(SharedPreferences prefs) throws Exception {
@@ -320,7 +324,7 @@ public final class MainActivity extends Activity {
             for (String address : spec.urls) {
                 HttpURLConnection connection = null;
                 try {
-                    connection = (HttpURLConnection) new URL(address).openConnection(); connection.setConnectTimeout(10000); connection.setReadTimeout(30000); connection.setInstanceFollowRedirects(true); connection.setRequestProperty("User-Agent", "XGuard/0.8.5");
+                    connection = (HttpURLConnection) new URL(address).openConnection(); connection.setConnectTimeout(10000); connection.setReadTimeout(30000); connection.setInstanceFollowRedirects(true); connection.setRequestProperty("User-Agent", "XGuard/0.8.6");
                     if (connection.getResponseCode() / 100 != 2) continue;
                     try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8)); BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(temp), StandardCharsets.UTF_8))) {
                         String line; long bytes = 0; while ((line = reader.readLine()) != null) { bytes += line.length() + 1; if (bytes > 20L * 1024L * 1024L) throw new IOException("订阅过大"); writer.write(line); writer.newLine(); }

@@ -22,7 +22,7 @@ $env:XGUARD_KEY_PASS = '你的签名密码'
 ## 模块 ZIP
 
 ```powershell
-./build-release.ps1 -Tools 'C:/Android/Sdk/build-tools/35.0.0' -OutputFile './XGuard-v0.8.5-module.zip'
+./build-release.ps1 -Tools 'C:/Android/Sdk/build-tools/35.0.0' -OutputFile './XGuard-v0.8.6-module.zip'
 ```
 
 脚本检查 APK 名称、包名、版本、签名、WebUI 资源和 ZIP 内嵌 APK 一致性。输出的 ZIP 根目录包含 `module.prop`，可交给 Root 管理器安装。
@@ -33,7 +33,7 @@ $env:XGUARD_KEY_PASS = '你的签名密码'
 ./no-root/build-app.ps1 -AndroidSdk 'C:/Android/Sdk' -KeyStore 'C:/keys/xguard.jks' -KeyAlias xguard
 ```
 
-输出 `no-root/XGuard-v0.8.5-no-root.apk`，最低 Android 6.0。脚本启用 v1 / v2 / v3 签名并执行校验。
+输出 `no-root/XGuard-v0.8.6-no-root.apk`，最低 Android 6.0。脚本启用 v1 / v2 / v3 签名并执行校验。
 
 模块 APK 与免 Root APK 都使用包名 `com.xuan.xguard`。自己重新签名的 APK 不一定能覆盖 Releases 中已有签名的应用；版本切换前保留所需数据。
 
