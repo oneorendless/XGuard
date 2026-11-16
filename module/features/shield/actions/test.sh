@@ -98,7 +98,7 @@ for m in /data/adb/modules/*; do
   [ -f "$m/disable" ] || [ -f "$m/remove" ] && continue
   others="$others ${m##*/}"
 done
-locked=0; [ -f "$AD_DIR/locked.list" ] && locked=$(cut -d' ' -f1 "$AD_DIR/locked.list" | sort -u | wc -l | tr -d ' ')
+locked=$(splash_locked_count)
 srules=$(splash_rules | grep -c .)
 ga=false; guard_active && ga=true
 

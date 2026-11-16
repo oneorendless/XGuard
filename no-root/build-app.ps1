@@ -22,7 +22,8 @@ foreach($resourceDir in @('drawable','mipmap-anydpi-v26','mipmap-anydpi-v33','va
 }
 Copy-Item "$sourceRoot/app/AndroidManifest.xml" "$buildRoot/AndroidManifest.xml" -Force
 Copy-Item $platformJar "$buildRoot/android.jar" -Force
-$sources=Get-ChildItem "$sourceRoot/app/src" -Recurse -Filter '*.java' -File | ForEach-Object FullName
+$sources=@(Get-ChildItem "$sourceRoot/app/src" -Recurse -Filter '*.java' -File | ForEach-Object FullName)
+$sources+=Get-ChildItem "$sourceRoot/../shared/src" -Recurse -Filter '*.java' -File | ForEach-Object FullName
 & javac -source 8 -target 8 -encoding UTF-8 -classpath "$buildRoot/android.jar" -d "$buildRoot/classes" $sources
 if($LASTEXITCODE -ne 0){throw 'javac 失败'}
 $classes=Get-ChildItem "$buildRoot/classes" -Recurse -Filter '*.class' -File | ForEach-Object FullName
@@ -40,5 +41,18 @@ if($LASTEXITCODE -ne 0){throw 'zipalign 失败'}
 if($LASTEXITCODE -ne 0){throw '签名失败'}
 & "$tools/apksigner.bat" verify --verbose "$buildRoot/xguard-no-root.apk"
 if($LASTEXITCODE -ne 0){throw '签名校验失败'}
-Copy-Item "$buildRoot/xguard-no-root.apk" "$sourceRoot/XGuard-v0.8.3-no-root.apk" -Force
-Write-Output "构建完成：$sourceRoot/XGuard-v0.8.3-no-root.apk"
+$badging=& "$tools/aapt.exe" dump badging "$buildRoot/xguard-no-root.apk"
+if($LASTEXITCODE -ne 0 -or ($badging -join "`n") -notmatch "package: name='com.xuan.xguard' versionCode='80051' versionName='0.8.5-noroot'"){throw '免 Root APK 包名/版本校验失败'}
+$assetZip=[IO.Compression.ZipFile]::OpenRead("$buildRoot/xguard-no-root.apk")
+try {
+    foreach($asset in Get-ChildItem "$sourceRoot/app/assets" -Recurse -File){
+        $relative=[IO.Path]::GetRelativePath("$sourceRoot/app/assets",$asset.FullName).Replace('\','/')
+        $entry=$assetZip.GetEntry('assets/'+$relative)
+        if(-not $entry){throw "APK 缺少资源：$relative"}
+        $stream=$entry.Open(); $memory=[IO.MemoryStream]::new()
+        try{$stream.CopyTo($memory); $actual=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($memory.ToArray()))}finally{$stream.Dispose(); $memory.Dispose()}
+        if($actual -ne (Get-FileHash -LiteralPath $asset.FullName).Hash){throw "APK 资源不一致：$relative"}
+    }
+}finally{$assetZip.Dispose()}
+Copy-Item "$buildRoot/xguard-no-root.apk" "$sourceRoot/XGuard-v0.8.5-no-root.apk" -Force
+Write-Output "构建完成：$sourceRoot/XGuard-v0.8.5-no-root.apk"

@@ -21,6 +21,7 @@ type snapshot struct {
 	Updated  int64   `json:"updated"`
 	Packets  uint64  `json:"packets"`
 	Observed uint64  `json:"observed"`
+	Matched  uint64  `json:"matched"`
 }
 
 func main() {
@@ -107,6 +108,9 @@ func main() {
 					item.RuleBlocked = blocked[item.Domain]
 					state.Items = append(state.Items, item)
 					state.Observed++
+					if item.RuleBlocked {
+						state.Matched++
+					}
 					if len(state.Items) > 240 {
 						state.Items = state.Items[len(state.Items)-240:]
 					}
@@ -119,7 +123,6 @@ func main() {
 		if time.Since(last) >= time.Second {
 			if _, e := os.Stat(*out + ".clear"); e == nil {
 				state.Items = []event{}
-				state.Observed = 0
 				seen = map[string]int64{}
 				os.Remove(*out + ".clear")
 			}

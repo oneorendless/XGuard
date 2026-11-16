@@ -3,11 +3,11 @@
 name=XGuard
 description=域名防护、实时活动查看、自定义封禁与放行；基于原防护引擎规则引擎的 Xuan 二创
 icon=shield-check
-version=0.8.3
+version=0.8.5
 stages=service
 order=40
 default_enabled=1
-events=net,tick,config
+events=net,tick,config,splash
 conflicts=AdGuardHome,adguardhome,hosts,systemless_hosts,bindhosts,Re-Malwack,re-malwack
 timeout=300
 needs_reboot=0

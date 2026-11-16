@@ -1,6 +1,6 @@
 id=xguard
 name=XGuard
-version=v0.8.3
-versionCode=8003
+version=v0.8.5
+versionCode=8005
 author=Xuan
 description=域名防护 · DNS / TLS 实时域名 · 一键封禁与放行。二创自惜故里丶的防护引擎模块。

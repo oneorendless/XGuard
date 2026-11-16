@@ -35,15 +35,22 @@ public final class XGuardVpnService extends VpnService {
     private static final String CHANNEL = "xguard-protection";
     private static final int NOTIFICATION_ID = 8303;
     private static final String DNS_IP = "10.231.0.1";
-    private static final Set<String> RULES = new HashSet<>();
+    private static volatile Set<String> RULES = Collections.emptySet();
     private static final List<ActivityItem> ACTIVITY = new ArrayList<>();
-    private static boolean rulesLoaded;
+    private static volatile boolean rulesLoaded;
+    private static long queries, blockedQueries, failedQueries, counterStarted;
+    private long lastCounterSave;
     private static volatile boolean running;
     private ParcelFileDescriptor tunnel;
     private Thread worker;
 
     @Override public void onCreate() {
         super.onCreate();
+        synchronized (XGuardVpnService.class) {
+            SharedPreferences stats = getSharedPreferences("xguard_stats", MODE_PRIVATE);
+            queries = stats.getLong("queries", 0); blockedQueries = stats.getLong("blocked", 0); failedQueries = stats.getLong("failed", 0);
+            counterStarted = stats.getLong("started", System.currentTimeMillis() / 1000L);
+        }
         loadRules(this);
         createChannel();
         if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
@@ -74,6 +81,7 @@ public final class XGuardVpnService extends VpnService {
     }
 
     @Override public void onDestroy() {
+        saveCounters();
         running = false;
         if (worker != null) worker.interrupt();
         closeTunnel();
@@ -95,13 +103,15 @@ public final class XGuardVpnService extends VpnService {
     }
 
     public static synchronized void reloadRules(Context context) {
-        RULES.clear();
+        Set<String> next = new HashSet<>();
+        loadAsset(context, "splash-domains.list", next);
         SharedPreferences prefs = context.getSharedPreferences("xguard", MODE_PRIVATE);
         Set<String> enabled = new HashSet<>(prefs.getStringSet("enabled_sources", Collections.emptySet()));
         if (enabled.isEmpty()) { enabled.add("baseline"); enabled.add("awavenue"); enabled.add("antiad"); enabled.add("goodbyeads"); enabled.add("adaway"); }
-        if (enabled.contains("baseline")) loadAsset(context, "blocklist.txt");
-        if (enabled.contains("httpdns")) loadAsset(context, "httpdns.list");
-        for (String id : enabled) if (!"baseline".equals(id) && !"httpdns".equals(id)) loadFile(context, new File(context.getFilesDir(), "source_" + id + ".list"));
+        if (enabled.contains("baseline")) loadAsset(context, "blocklist.txt", next);
+        if (enabled.contains("httpdns")) loadAsset(context, "httpdns.list", next);
+        for (String id : enabled) if (!"baseline".equals(id) && !"httpdns".equals(id)) loadFile(new File(context.getFilesDir(), "source_" + id + ".list"), next);
+        RULES = Collections.unmodifiableSet(next);
         rulesLoaded = true;
     }
 
@@ -136,6 +146,13 @@ public final class XGuardVpnService extends VpnService {
         JSONArray items = new JSONArray();
         for (ActivityItem item : ACTIVITY) items.put(item.json());
         snapshot.put("items", items);
+        JSONObject totals = new JSONObject();
+        SharedPreferences stored = context.getSharedPreferences("xguard_stats", MODE_PRIVATE);
+        totals.put("queries", counterStarted == 0 ? stored.getLong("queries", 0) : queries);
+        totals.put("blocked", counterStarted == 0 ? stored.getLong("blocked", 0) : blockedQueries);
+        totals.put("failed", counterStarted == 0 ? stored.getLong("failed", 0) : failedQueries);
+        totals.put("started", counterStarted == 0 ? stored.getLong("started", 0) : counterStarted);
+        snapshot.put("totals", totals);
         JSONObject result = new JSONObject(); result.put("collector", collector); result.put("snapshot", snapshot); return result;
     }
 
@@ -148,14 +165,26 @@ public final class XGuardVpnService extends VpnService {
                 DnsQuery query = parseQuery(packet, length);
                 if (query == null) continue;
                 boolean blocked = isBlocked(this, query.name);
-                record(query.name, blocked);
                 byte[] dns = blocked ? blockedResponse(query) : forward(query.payload, query.payloadLength);
-                if (dns == null) dns = failureResponse(query);
+                boolean failed = dns == null;
+                if (failed) dns = failureResponse(query);
                 byte[] response = wrapResponse(packet, length, query, dns);
-                if (response != null) output.write(response);
+                if (response != null) {
+                    output.write(response);
+                    synchronized (XGuardVpnService.class) { queries++; if (blocked) blockedQueries++; if (failed) failedQueries++; }
+                    if (getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("collector", true)) record(query.name, blocked);
+                    if (System.currentTimeMillis() - lastCounterSave > 5000) saveCounters();
+                }
             }
         } catch (Exception ignored) {
             running = false;
+        }
+    }
+
+    private void saveCounters() {
+        synchronized (XGuardVpnService.class) {
+            getSharedPreferences("xguard_stats", MODE_PRIVATE).edit().putLong("queries", queries).putLong("blocked", blockedQueries).putLong("failed", failedQueries).putLong("started", counterStarted).apply();
+            lastCounterSave = System.currentTimeMillis();
         }
     }
 
@@ -238,8 +267,7 @@ public final class XGuardVpnService extends VpnService {
         reloadRules(context);
     }
 
-    private static void loadAsset(Context context, String name) { try (BufferedReader reader = new BufferedReader(new InputStreamReader(context.getAssets().open(name), StandardCharsets.UTF_8))) { String line; while ((line = reader.readLine()) != null) addRuleLine(line, RULES); } catch (Exception ignored) { } }
-    private static void loadFile(Context context, File file) { loadFile(file, RULES); }
+    private static void loadAsset(Context context, String name, Set<String> target) { try (BufferedReader reader = new BufferedReader(new InputStreamReader(context.getAssets().open(name), StandardCharsets.UTF_8))) { String line; while ((line = reader.readLine()) != null) addRuleLine(line, target); } catch (Exception ignored) { } }
     private static void loadFile(File file, Set<String> target) { if (!file.isFile()) return; try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8))) { String line; while ((line = reader.readLine()) != null) addRuleLine(line, target); } catch (Exception ignored) { } }
     private static int addRuleLine(String raw, Set<String> target) {
         if (raw == null) return 0;

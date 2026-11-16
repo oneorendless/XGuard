@@ -79,6 +79,7 @@ public final class MainActivity extends Activity {
         }
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
+        if (Build.VERSION.SDK_INT >= 33) settings.setAlgorithmicDarkeningAllowed(false);
         settings.setDomStorageEnabled(true);
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(false);
@@ -87,6 +88,10 @@ public final class MainActivity extends Activity {
         webView.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
+                if ("https".equals(uri.getScheme()) && "github.com".equals(uri.getHost()) && "/oneorendless/XGuard".equals(uri.getPath())) {
+                    try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); } catch (Exception ignored) { }
+                    return true;
+                }
                 return !"file".equals(uri.getScheme()) || !uri.getPath().startsWith("/android_asset/");
             }
         });
@@ -195,6 +200,23 @@ public final class MainActivity extends Activity {
     private final class XGuardBridge {
         @JavascriptInterface public String getMode() { return "vpn"; }
         @JavascriptInterface public boolean isVpnPrepared() { return VpnService.prepare(MainActivity.this) == null; }
+        @JavascriptInterface public void setTheme(final boolean dark) {
+            runOnUiThread(() -> {
+                if (webView == null || isFinishing()) return;
+                webView.setBackgroundColor(dark ? Color.BLACK : Color.rgb(245,245,245));
+                getWindow().setStatusBarColor(dark ? Color.BLACK : Color.rgb(245,245,245));
+                getWindow().setNavigationBarColor(dark ? Color.BLACK : Color.rgb(245,245,245));
+                if (Build.VERSION.SDK_INT >= 30 && getWindow().getInsetsController() != null) {
+                    int mask = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                    getWindow().getInsetsController().setSystemBarsAppearance(dark ? 0 : mask, mask);
+                } else {
+                    int flags = getWindow().getDecorView().getSystemUiVisibility();
+                    int mask = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                    if (Build.VERSION.SDK_INT >= 26) mask |= android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                    getWindow().getDecorView().setSystemUiVisibility(dark ? flags & ~mask : flags | mask);
+                }
+            });
+        }
         @JavascriptInterface public void haptic() {
             runOnUiThread(() -> { if (webView != null && !isFinishing()) webView.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); });
         }
@@ -213,6 +235,7 @@ public final class MainActivity extends Activity {
         private String dispatch(JSONArray values) throws Exception {
             if (values.length() == 0) throw new IllegalArgumentException("缺少操作");
             String command = values.getString(0);
+            if ("apps".equals(command)) return AppCatalog.describe(MainActivity.this, values);
             if ("status".equals(command)) return statusJson();
             if ("enable".equals(command)) { startVpnService(); return ""; }
             if ("disable".equals(command)) { stopVpnService(); return ""; }
@@ -231,15 +254,14 @@ public final class MainActivity extends Activity {
             if ("test".equals(action)) return testJson();
             if ("update".equals(action)) return updateSources(prefs);
             if ("guard".equals(action) || "set".equals(action)) return settingsCommand(action, values, prefs);
-            if ("hits".equals(action)) return "{\"rules\":[]}";
-            if ("rules".equals(action)) return "{\"user\":[]}";
-            if ("discover".equals(action)) return "{\"candidates\":[]}";
+            if ("hits".equals(action)) return "{\"supported\":false,\"rules\":[]}";
+            if ("rules".equals(action) || "discover".equals(action) || "unlock".equals(action) || "relock".equals(action)) throw new IllegalArgumentException("开屏缓存锁定需要 Root；免 Root 版通过 DNS 拦截广告域名");
             return "{}";
         }
         private String statusJson() throws Exception {
             boolean enabled = getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("enabled", false) && XGuardVpnService.isRunning();
             JSONObject feature = new JSONObject(); feature.put("enabled", enabled); feature.put("conflict", false); feature.put("health", enabled ? "ok" : "off"); feature.put("summary", enabled ? "本地 VPN 正在拦截广告域名" : "点击开关开启本地 VPN 防护");
-            JSONObject result = new JSONObject(); result.put("root", "无 Root · Android VPN"); result.put("daemon", enabled ? "前台服务运行中" : "未启动"); result.put("safe_mode", false); result.put("version", "0.8.3"); result.put("features", new JSONArray().put(feature));
+            JSONObject result = new JSONObject(); result.put("root", "无 Root · Android VPN"); result.put("daemon", enabled ? "前台服务运行中" : "未启动"); result.put("safe_mode", false); result.put("version", "0.8.5"); result.put("features", new JSONArray().put(feature));
             return result.toString();
         }
         private String statsJson(SharedPreferences prefs) throws Exception {
@@ -298,7 +320,7 @@ public final class MainActivity extends Activity {
             for (String address : spec.urls) {
                 HttpURLConnection connection = null;
                 try {
-                    connection = (HttpURLConnection) new URL(address).openConnection(); connection.setConnectTimeout(10000); connection.setReadTimeout(30000); connection.setInstanceFollowRedirects(true); connection.setRequestProperty("User-Agent", "XGuard/0.8.3");
+                    connection = (HttpURLConnection) new URL(address).openConnection(); connection.setConnectTimeout(10000); connection.setReadTimeout(30000); connection.setInstanceFollowRedirects(true); connection.setRequestProperty("User-Agent", "XGuard/0.8.5");
                     if (connection.getResponseCode() / 100 != 2) continue;
                     try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8)); BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(temp), StandardCharsets.UTF_8))) {
                         String line; long bytes = 0; while ((line = reader.readLine()) != null) { bytes += line.length() + 1; if (bytes > 20L * 1024L * 1024L) throw new IOException("订阅过大"); writer.write(line); writer.newLine(); }

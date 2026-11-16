@@ -25,7 +25,8 @@ Copy-Item "$sourceRoot/app/res" "$buildRoot/res" -Recurse -Force
 Copy-Item "$sourceRoot/app/AndroidManifest.xml" "$buildRoot/AndroidManifest.xml" -Force
 Copy-Item $platformJar "$buildRoot/android.jar" -Force
 $platformJar=Join-Path $buildRoot 'android.jar'
-$sources=Get-ChildItem "$sourceRoot/app/src" -Recurse -Filter '*.java' -File | ForEach-Object FullName
+$sources=@(Get-ChildItem "$sourceRoot/app/src" -Recurse -Filter '*.java' -File | ForEach-Object FullName)
+$sources+=Get-ChildItem "$sourceRoot/shared/src" -Recurse -Filter '*.java' -File | ForEach-Object FullName
 & javac -source 8 -target 8 -encoding UTF-8 -classpath $platformJar -d "$buildRoot/classes" $sources
 if($LASTEXITCODE -ne 0){throw 'javac 失败'}
 $classes=Get-ChildItem "$buildRoot/classes" -Recurse -Filter '*.class' -File | ForEach-Object FullName
@@ -49,7 +50,7 @@ Copy-Item "$buildRoot/xguard.apk" "$sourceRoot/app/xguard.apk" -Force
 $badging=& "$tools/aapt.exe" dump badging "$buildRoot/xguard.apk"
 if($LASTEXITCODE -ne 0 -or $badging -notcontains "application-label:'XGuard'"){throw '内置 APK 名称校验失败'}
 if(($badging -join "`n") -notmatch "package: name='com.xuan.xguard'"){throw '内置 APK 包名校验失败'}
-if(($badging -join "`n") -notmatch "versionCode='8003' versionName='0.8.3'"){throw '内置 APK 版本校验失败'}
+if(($badging -join "`n") -notmatch "versionCode='8005' versionName='0.8.5'"){throw '内置 APK 版本校验失败'}
 if((Get-FileHash "$sourceRoot/module/app/xguard.apk").Hash -ne (Get-FileHash "$buildRoot/xguard.apk").Hash){throw '模块内 APK 与新编译结果不一致'}
 if((Get-FileHash "$sourceRoot/app/xguard.apk").Hash -ne (Get-FileHash "$buildRoot/xguard.apk").Hash){throw '开发目录 APK 与新编译结果不一致'}
 Write-Output "构建完成（模块内 APK）：$sourceRoot/module/app/xguard.apk"

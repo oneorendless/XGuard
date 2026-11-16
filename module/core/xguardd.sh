@@ -25,6 +25,7 @@ producers() {
   done >"$FIFO" &
 
   ( while :; do sleep 900; echo "tick 15"; done ) >"$FIFO" &
+  ( while :; do sleep 30; echo "splash repair"; done ) >"$FIFO" &
 }
 
 dispatch() {   # dispatch <event> <arg>

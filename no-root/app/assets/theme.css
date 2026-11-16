@@ -1,6 +1,6 @@
 /* XGuard theme tokens. All interface colors are defined only in this file. */
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
   --primary: #1677FF;
   --background: #F5F5F5;
   --ambient-background: url("background-light.svg");
@@ -49,8 +49,8 @@
   --motion-spring: cubic-bezier(.2,1.22,.35,1);
   --motion-page: cubic-bezier(.2,.8,.2,1);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
+:root[data-theme=dark] {
+    color-scheme: dark;
     --background: #000000;
     --ambient-background: url("background-dark.svg");
     --ambient-opacity: .48;
@@ -85,5 +85,4 @@
     --glass-shadow: 0 8px 28px rgba(0,0,0,.22);
     --shadow: 0 10px 30px rgba(0,0,0,.30), 0 2px 8px rgba(0,0,0,.16);
     --scrim: rgba(0,0,0,.48);
-  }
 }

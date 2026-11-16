@@ -1,6 +1,7 @@
 package com.xuan.xguard;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.os.Bundle;
 import android.os.Build;
 import android.content.res.Configuration;
@@ -40,6 +41,7 @@ public final class MainActivity extends Activity {
         }
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
+        if (Build.VERSION.SDK_INT >= 33) settings.setAlgorithmicDarkeningAllowed(false);
         settings.setDomStorageEnabled(true);
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(false);
@@ -48,6 +50,10 @@ public final class MainActivity extends Activity {
         webView.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
+                if ("https".equals(uri.getScheme()) && "github.com".equals(uri.getHost()) && "/oneorendless/XGuard".equals(uri.getPath())) {
+                    try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); } catch (Exception ignored) { }
+                    return true;
+                }
                 return !"file".equals(uri.getScheme()) || !uri.getPath().startsWith("/android_asset/");
             }
         });
@@ -70,6 +76,23 @@ public final class MainActivity extends Activity {
     }
 
     private final class RootBridge {
+        @JavascriptInterface public void setTheme(final boolean dark) {
+            runOnUiThread(() -> {
+                if (webView == null || isFinishing()) return;
+                webView.setBackgroundColor(dark ? Color.BLACK : Color.rgb(245,245,245));
+                getWindow().setStatusBarColor(dark ? Color.BLACK : Color.rgb(245,245,245));
+                getWindow().setNavigationBarColor(dark ? Color.BLACK : Color.rgb(245,245,245));
+                if (Build.VERSION.SDK_INT >= 30 && getWindow().getInsetsController() != null) {
+                    int mask = android.view.WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS | android.view.WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS;
+                    getWindow().getInsetsController().setSystemBarsAppearance(dark ? 0 : mask, mask);
+                } else {
+                    int flags = getWindow().getDecorView().getSystemUiVisibility();
+                    int mask = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+                    if (Build.VERSION.SDK_INT >= 26) mask |= android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+                    getWindow().getDecorView().setSystemUiVisibility(dark ? flags & ~mask : flags | mask);
+                }
+            });
+        }
         @JavascriptInterface public void haptic() {
             runOnUiThread(() -> { if (!isFinishing()) webView.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); });
         }
@@ -103,13 +126,17 @@ public final class MainActivity extends Activity {
                 String output;
                 try {
                     JSONArray values = new JSONArray(arguments);
+                    if (values.length() > 0 && "apps".equals(values.getString(0))) {
+                        deliver(callback, 0, AppCatalog.describe(MainActivity.this, values));
+                        return;
+                    }
                     StringBuilder command = new StringBuilder("sh /data/adb/modules/xguard/system/bin/xguard");
                     for (int index = 0; index < values.length(); index++) {
                         String value = values.getString(index);
                         if (value.indexOf('\u0000') >= 0) throw new IllegalArgumentException("无效参数");
                         command.append(" '").append(value.replace("'", "'\\''")).append("'");
                     }
-                    Process process = new ProcessBuilder("su", "-c", command.toString()).redirectErrorStream(true).start();
+                    Process process = new ProcessBuilder("su", "-M", "-c", command.toString()).redirectErrorStream(true).start();
                     StringBuilder text = new StringBuilder();
                     BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                     String line;

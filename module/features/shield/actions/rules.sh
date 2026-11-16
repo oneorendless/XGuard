@@ -5,6 +5,6 @@
 . "$XG_FDIR/lib.sh"
 case "${1:-}" in
   add) rule_add "$2" "$3" && echo ok ;;
-  remove) rule_remove "$2" "$3"; echo ok ;;
+  remove) rule_remove "$2" "$3" && echo ok ;;
   *) rules_json ;;
 esac

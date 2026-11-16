@@ -4,7 +4,8 @@
 case "$1" in
   net) sleep 3; reconcile                    # 代理服务启停通常伴随路由变化
        src_missing && shield_kick_update net ;;  # 联网了但还有源从没下载成功（首次安装 / 开机时没网）
-  tick) hosts_update; reconcile ;;          # 先更新再挂：首次下载成功后立刻挂上，不必再等 15 分钟
+  tick) hosts_update; reconcile; splash_apply ;;
+  splash) splash_apply ;;
   config)
     case "$2" in
       shield/config.json|adblock.prop) reconcile; splash_apply ;;   # 本插件配置变了

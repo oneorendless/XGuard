@@ -10,6 +10,7 @@ rm -f "$AUTO_PID"
 hosts_off
 guard_off
 splash_unlock
+splash_network_off
 # 关闭后自查：hosts 还在哪个命名空间 / iptables 还有本插件规则，写日志（App「防护引擎日志」可见）
 _r=$(hosts_residue); _g=$(guard_residue)
 if [ "${_r:-0}" -gt 0 ] || [ -n "$_g" ]; then log $SHIELD "关闭后仍有残留：hosts 命名空间 ${_r:-0} 个 ${_g}"; else log $SHIELD "关闭完成：hosts 已全部卸载，iptables 无残留"; fi

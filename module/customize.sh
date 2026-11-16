@@ -28,5 +28,5 @@ find "$MODPATH/bin" -type f -name xguard-monitor -exec chmod 0755 {} +
 find "$MODPATH" -type f -name '*.sh' -exec chmod 0755 {} +
 set_perm "$MODPATH/system/bin/xguard" 0 2000 0755
 ui_print '  ✓ 规则与设置已迁移，原数据保留'
-ui_print '  ✓ XGuard 0.8.3 App / WebUI'
+ui_print "  ✓ XGuard $(prop_get "$MODPATH/module.prop" version) App / WebUI"
 ui_print '  重启后生效 · 新 App 首次打开需授予 Root'

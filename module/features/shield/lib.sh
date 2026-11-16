@@ -310,6 +310,7 @@ hosts_build() {
   tmp=$AD_DIR/hosts.new
   # 每行「u 域名」= 用户自定义拦截（不受内置放行影响）、「s 域名」= 规则源；用户放行对两者都生效
   { [ -s "$BLOCK" ] && normalize <"$BLOCK" | sed 's/^/u /'
+    normalize <"$XG_FDIR/rules/splash-domains.list" | sed 's/^/s /'
     for _i in $(active_ids); do
       if _bf=$(src_builtin_file "$_i"); then [ -s "$_bf" ] && normalize <"$_bf" | sed 's/^/s /'
       else [ -s "$SRC_DIR/$_i.list" ] && sed 's/^/s /' "$SRC_DIR/$_i.list"; fi
@@ -574,35 +575,61 @@ reconcile() {
   return 0
 }
 
-skipped() { [ -f "$SKIP" ] && grep -qx "$1" "$SKIP"; }
+skipped() { [ -f "$SKIP" ] && grep -Fxq "$1" "$SKIP"; }
 
 # 规则合并：模块内置 + 用户自定义（$XG_DATA/shield/splash.rules）
-splash_rules() { grep -hvE '^[[:space:]]*(#|$)' "$XG_FDIR/rules/splash.rules" "$USER_RULES" 2>/dev/null; }
+splash_rules() { grep -hvE '^[[:space:]]*(#|$)' "$XG_FDIR/rules/splash.rules" "$USER_RULES" 2>/dev/null | awk 'NF>=2 {p=$1; sub(/^.*:/,"",p); k=p " " $2; if (!seen[k]++) print k}'; }
+
+splash_mutex() {
+  mkdir -p "$XG_RUN"
+  _wait=0
+  until mkdir "$XG_RUN/splash.lock" 2>/dev/null; do
+    _owner=$(cat "$XG_RUN/splash.lock/pid" 2>/dev/null)
+    case "$_owner" in ''|*[!0-9]*) ;; *)
+      if ! kill -0 "$_owner" 2>/dev/null; then rm -f "$XG_RUN/splash.lock/pid"; rmdir "$XG_RUN/splash.lock" 2>/dev/null; continue; fi ;;
+    esac
+    _wait=$((_wait+1)); [ "$_wait" -lt 50 ] || { echo '开屏规则正在处理，请重试'; return 1; }
+    sleep 0.1
+  done
+  echo $$ >"$XG_RUN/splash.lock/pid"
+  trap 'rm -f "$XG_RUN/splash.lock/pid"; rmdir "$XG_RUN/splash.lock" 2>/dev/null' EXIT
+}
 
 # 规则路径校验：相对路径、不含 ..、不以 / 开头，可带 @sdcard: 前缀
 valid_rel() {
   r=${1#@sdcard:}
-  case "$r" in ""|/*|*..*|*" "*) return 1 ;; esac
-  printf '%s' "$r" | grep -qE '^[A-Za-z0-9_./-]+$'
+  case "$r" in ""|/*|*..*|*" "*|.|./*|*/./*|*/.|*/) return 1 ;; esac
+  case "$r" in *[!A-Za-z0-9_./-]*) return 1 ;; esac
+  return 0
 }
 valid_pkg() { printf '%s' "$1" | grep -qE '^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$'; }
 
 # 用户规则增删（App 规则编辑器）
-rule_add() {
+rule_add() (
   valid_pkg "$1" || { echo "包名无效：$1"; return 2; }
   valid_rel "$2" || { echo "目录无效：$2（需相对 data 目录，不能含 .. 或空格）"; return 2; }
+  splash_mutex || return 1
   mkdir -p "$AD_DIR"; touch "$USER_RULES"
-  grep -qE "^$1[[:space:]]+$2\$" "$USER_RULES" || printf '%s\t%s\n' "$1" "$2" >>"$USER_RULES"
-  log $SHIELD "新增开屏规则 $1 $2"; splash_apply; return 0
-}
-rule_remove() {
+  awk -v p="$1" -v r="$2" '$1==p && $2==r {found=1} END {exit !found}' "$USER_RULES" || printf '%s\t%s\n' "$1" "$2" >>"$USER_RULES"
+  if feat_enabled "$SHIELD" && ! skipped "$1"; then
+    splash_target "$1" "$2"
+    if splash_lock_one "$_sb" "$_st"; then
+      printf '%s %s\n' "$1" "$2" >>"$AD_DIR/locked.list"
+    fi
+  fi
+  log $SHIELD "新增开屏规则 $1 $2"; return 0
+)
+rule_remove() (
+  valid_pkg "$1" && valid_rel "$2" || return 2
+  splash_mutex || return 1
   [ -f "$USER_RULES" ] || return 0
   awk -v p="$1" -v r="$2" '!($1==p && $2==r)' "$USER_RULES" >"$USER_RULES.tmp" && mv -f "$USER_RULES.tmp" "$USER_RULES"
   # 只解锁这一条
+  splash_rules | awk -v p="$1" -v r="$2" '$1==p && $2==r {found=1} END {exit !found}' && return 0
   splash_target "$1" "$2"; splash_unlock_one "$_st"
   [ -f "$AD_DIR/locked.list" ] && { awk -v p="$1" -v r="$2" '!($1==p && $2==r)' "$AD_DIR/locked.list" >"$AD_DIR/l.tmp"; mv -f "$AD_DIR/l.tmp" "$AD_DIR/locked.list"; }
   log $SHIELD "删除开屏规则 $1 $2"
-}
+)
 rules_json() {
   printf '{"builtin":'; rules_file_json "$XG_FDIR/rules/splash.rules"
   printf ',"user":'; rules_file_json "$USER_RULES"; printf '}\n'
@@ -621,19 +648,23 @@ rules_file_json() {
 # 输出 {"candidates":[{"pkg","path","kb"}]}，path 与规则格式一致（相对路径或 @sdcard:相对路径）
 SPLASH_NAME_RE='(splash|launch_?ad|open_?screen_?ad|kaiping|ad_?cache|adcache|tt_?ad|ksad|gdt_?ad|pangle|mintegral|bdad|sigmob)'
 splash_discover() {   # [包名]
-  printf '{"candidates":['; _f=1
+  [ -z "${1:-}" ] || valid_pkg "$1" || { echo '包名无效'; return 2; }
+  _depth=${2:-8}
+  case "$_depth" in 6|8|12) ;; *) echo '扫描深度需为 6、8 或 12'; return 2 ;; esac
+  _scanrules=$AD_DIR/discover.rules.$$
+  splash_rules >"$_scanrules"
+  printf '{"depth":%s,"limit_per_app":60,"candidates":[' "$_depth"; _f=1
   for base in /data/data /data/media/0/Android/data; do
     for d in "$base"/${1:-*}; do
       [ -d "$d" ] || continue
       pkg=${d##*/}
       skipped "$pkg" && continue
-      find "$d" -mindepth 1 -maxdepth 4 -type d 2>/dev/null | grep -iE "/[^/]*${SPLASH_NAME_RE}[^/]*\$" | head -n 6 |
+      find "$d" -mindepth 1 -maxdepth "$_depth" -type d 2>/dev/null | grep -iE "/[^/]*${SPLASH_NAME_RE}[^/]*\$" | head -n 60 |
       while read -r hit; do
         rel=${hit#"$d"/}
-        case "$rel" in */*/*/*/*) continue ;; esac
         [ "$base" = /data/media/0/Android/data ] && rel="@sdcard:$rel"
         valid_rel "$rel" || continue
-        splash_rules | grep -qE "^${pkg}[[:space:]]+$rel\$" && continue    # 已有规则
+        awk -v p="$pkg" -v r="$rel" '$1==p && $2==r {found=1} END {exit !found}' "$_scanrules" && continue
         kb=$(du -sk "$hit" 2>/dev/null | cut -f1)
         printf '%s\t%s\t%s\n' "$pkg" "$rel" "${kb:-0}"
       done
@@ -643,6 +674,7 @@ splash_discover() {   # [包名]
     printf '{"pkg":"%s","path":"%s","kb":%s}' "$(json_esc "$pkg")" "$(json_esc "$rel")" "${kb:-0}"
   done
   printf ']}\n'
+  rm -f "$_scanrules"
 }
 
 # ---------- 开屏缓存锁定 ----------
@@ -662,12 +694,29 @@ shield_immutable() {
   _la=$(lsattr -d "$1" 2>/dev/null || bb lsattr -d "$1" 2>/dev/null) || return 1
   case "${_la%% *}" in *i*) return 0 ;; esac; return 1
 }
-# 已锁：不可变，或旧版的空文件占位
-splash_is_locked() { [ -e "$1" ] || return 1; shield_immutable "$1" && return 0; [ -f "$1" ] && [ ! -s "$1" ]; }
+splash_is_locked() { [ -e "$1" ] && shield_immutable "$1"; }
+splash_is_weak() { [ -f "$1" ] && [ ! -s "$1" ] && [ "$(stat -c %a "$1" 2>/dev/null)" = 400 ]; }
 splash_lock_one() {   # <app 目录> <目标>；0 = 已锁，1 = 暂不能锁（未安装 / 上级目录还没建）
   _b=$1; _t=$2; _par=${_t%/*}
-  [ -d "$_b" ] && [ -d "$_par" ] || return 1
+  [ -d "$_b" ] || return 1
+  _realbase=$(readlink -f "$_b")
+  _walk=$_b; _rest=${_par#"$_b"}
+  while [ -n "$_rest" ]; do
+    _rest=${_rest#/}; _part=${_rest%%/*}; _walk=$_walk/$_part
+    case "$_rest" in */*) _rest=${_rest#*/} ;; *) _rest= ;; esac
+    [ ! -L "$_walk" ] || return 1
+    if [ ! -d "$_walk" ]; then
+      _parent=${_walk%/*}
+      mkdir "$_walk" 2>/dev/null || return 1
+      chown "$(stat -c %u:%g "$_parent")" "$_walk" 2>/dev/null
+      chmod "$(stat -c %a "$_parent")" "$_walk" 2>/dev/null
+      _pc=$(ls -Zd "$_parent" | awk '{print $1}'); chcon "$_pc" "$_walk" 2>/dev/null
+    fi
+  done
+  [ ! -L "$_t" ] || return 1
+  case "$(readlink -f "$_par")/" in "$_realbase"/*) ;; *) return 1 ;; esac
   shield_immutable "$_t" && return 0
+  splash_is_weak "$_t" && return 0
   _own=$(stat -c %u:%g "$_par" 2>/dev/null); _ctx=$(ls -Zd "$_par" 2>/dev/null | awk '{print $1}')
   if [ -d "$_t" ]; then rm -rf "$_t"/* "$_t"/.[!.]* 2>/dev/null
   elif [ -f "$_t" ]; then : >"$_t"
@@ -688,32 +737,86 @@ splash_unlock_one() {   # <目标>
   return 0
 }
 
-splash_apply() {
+splash_apply() (
   feat_enabled "$SHIELD" || return 0
-  _ll=$AD_DIR/locked.list.new; : >"$_ll"
+  splash_mutex || return 1
+  _ll=$AD_DIR/locked.list.$$; : >"$_ll"
   splash_rules |
   while read -r pkg rel; do
     pkg=${pkg#*:}
+    [ -z "${1:-}" ] || [ "$pkg" = "$1" ] || continue
     [ -n "$rel" ] || continue
+    valid_pkg "$pkg" && valid_rel "$rel" || continue
     skipped "$pkg" && continue          # 用户在 App 里单独解锁过
     splash_target "$pkg" "$rel"
     splash_lock_one "$_sb" "$_st" && echo "$pkg $rel" >>"$_ll"
   done
-  sort -u "$_ll" >"$AD_DIR/locked.list"; rm -f "$_ll"
+  if [ -n "${1:-}" ]; then
+    awk -v p="$1" '$1!=p' "$AD_DIR/locked.list" 2>/dev/null >>"$_ll"
+  fi
+  sort -u "$_ll" >"$_ll.sorted"; mv -f "$_ll.sorted" "$AD_DIR/locked.list"; rm -f "$_ll"
+  splash_network_sync
+)
+splash_network_off() {
+  for _ipt in iptables ip6tables; do
+    command -v "$_ipt" >/dev/null 2>&1 || continue
+    while "$_ipt" -w -D OUTPUT -j XGUARD_SPLASH 2>/dev/null; do :; done
+    "$_ipt" -w -F XGUARD_SPLASH 2>/dev/null; "$_ipt" -w -X XGUARD_SPLASH 2>/dev/null
+  done
+  return 0
 }
-splash_unlock() {   # [包名]，空则全部
+splash_network_sync() {
+  _uid=$(stat -c %u /data/user/0/com.xunlei.downloadprovider 2>/dev/null)
+  case "$_uid" in ''|*[!0-9]*) _uid=0 ;; esac
+  _wanted=0
+  if feat_enabled "$SHIELD" && ! skipped com.xunlei.downloadprovider && [ "$_uid" -ge 10000 ]; then _wanted=1; fi
+  for _ipt in iptables ip6tables; do
+    command -v "$_ipt" >/dev/null 2>&1 || continue
+    if [ "$_wanted" = 0 ]; then
+      while "$_ipt" -w -D OUTPUT -j XGUARD_SPLASH 2>/dev/null; do :; done
+      "$_ipt" -w -F XGUARD_SPLASH 2>/dev/null; "$_ipt" -w -X XGUARD_SPLASH 2>/dev/null
+      continue
+    fi
+    _signature=$(printf '%s\n%s\n%s' "$_uid" "$(cksum "$XG_FDIR/rules/splash-domains.list")" "$(cksum "$ALLOW" 2>/dev/null)" | cksum | awk '{print $1}')
+    if "$_ipt" -w -C XGUARD_SPLASH -m comment --comment "xguard-$_signature" -j RETURN 2>/dev/null && "$_ipt" -w -C OUTPUT -j XGUARD_SPLASH 2>/dev/null; then continue; fi
+    "$_ipt" -w -N XGUARD_SPLASH 2>/dev/null
+    "$_ipt" -w -F XGUARD_SPLASH 2>/dev/null || continue
+    "$_ipt" -w -A XGUARD_SPLASH -m owner ! --uid-owner "$_uid" -j RETURN
+    _ok=1
+    grep -vE '^[[:space:]]*(#|$)' "$XG_FDIR/rules/splash-domains.list" | while read -r _host; do
+      _allowed=0; _suffix=$_host
+      [ -f "$ALLOW" ] && grep -Fixq "$_host" "$ALLOW" && _allowed=1
+      while [ "$_allowed" = 0 ] && [ -f "$ALLOW" ]; do
+        grep -Fixq "*.$_suffix" "$ALLOW" && { _allowed=1; break; }
+        case "$_suffix" in *.*) _suffix=${_suffix#*.} ;; *) break ;; esac
+      done
+      [ "$_allowed" = 0 ] || continue
+      "$_ipt" -w -A XGUARD_SPLASH -p tcp -m owner --uid-owner "$_uid" -m string --algo kmp --string "$_host" -j REJECT --reject-with tcp-reset 2>/dev/null || exit 1
+    done || _ok=0
+    if [ "$_ok" = 1 ]; then
+      "$_ipt" -w -A XGUARD_SPLASH -m comment --comment "xguard-$_signature" -j RETURN
+      "$_ipt" -w -C OUTPUT -j XGUARD_SPLASH 2>/dev/null || "$_ipt" -w -I OUTPUT 1 -j XGUARD_SPLASH
+    else
+      "$_ipt" -w -F XGUARD_SPLASH 2>/dev/null
+      log "$SHIELD" "$_ipt 不支持广告主机补防，仍使用 hosts 与缓存锁定"
+    fi
+  done
+  return 0
+}
+splash_unlock_targets() {
   [ -f "$AD_DIR/locked.list" ] || return 0
   while read -r pkg rel; do
     [ -n "${1:-}" ] && [ "$pkg" != "$1" ] && continue
     splash_target "$pkg" "$rel"; splash_unlock_one "$_st"
   done <"$AD_DIR/locked.list"
-  if [ -n "${1:-}" ]; then grep -v "^$1 " "$AD_DIR/locked.list" >"$AD_DIR/l.tmp"; mv -f "$AD_DIR/l.tmp" "$AD_DIR/locked.list"
+  if [ -n "${1:-}" ]; then awk -v p="$1" '$1!=p' "$AD_DIR/locked.list" >"$AD_DIR/l.tmp"; mv -f "$AD_DIR/l.tmp" "$AD_DIR/locked.list"
   else rm -f "$AD_DIR/locked.list"; fi
 }
+splash_unlock() ( splash_mutex || return 1; splash_unlock_targets "${1:-}"; )
 
 # 单个 App 解锁并记住（之后的 config/开机事件不再锁它）；relock 撤销
-splash_skip() { mkdir -p "$AD_DIR"; skipped "$1" || echo "$1" >>"$SKIP"; splash_unlock "$1"; log $SHIELD "已单独解锁 $1"; }
-splash_relock() { [ -f "$SKIP" ] && { grep -vx "$1" "$SKIP" >"$SKIP.tmp"; mv -f "$SKIP.tmp" "$SKIP"; }; splash_apply; log $SHIELD "已恢复锁定 $1"; }
+splash_skip() ( valid_pkg "$1" || return 2; splash_mutex || return 1; mkdir -p "$AD_DIR"; skipped "$1" || echo "$1" >>"$SKIP"; splash_unlock_targets "$1"; splash_network_sync; log $SHIELD "已单独解锁 $1"; )
+splash_relock() { valid_pkg "$1" || return 2; ( splash_mutex || exit 1; [ -f "$SKIP" ] && { grep -Fvx "$1" "$SKIP" >"$SKIP.tmp"; mv -f "$SKIP.tmp" "$SKIP"; }; exit 0; ) || return 1; splash_apply "$1"; log $SHIELD "已恢复锁定 $1"; }
 
 # 非注释行数；文件不存在 = 0（grep -c 无匹配时退出码 1，旧写法会输出 "0\n0"）
 cnt_lines() { _n=0; [ -f "$1" ] && _n=$(grep -cvE '^[[:space:]]*(#|$)' "$1" 2>/dev/null); printf '%s' "${_n:-0}"; }
@@ -722,16 +825,24 @@ json_esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
 # 规则命中情况（JSON）：每条规则 = 包名 + 目录 + 状态
 # state: locked 已锁 / skipped 用户解锁 / pending 已安装待锁 / absent 未安装
-splash_hits_json() {
-  printf '{"rules":['
-  first=1
+splash_states() {
   splash_rules | while read -r pkg rel; do
     pkg=${pkg#*:}
+    [ -z "${1:-}" ] || [ "$pkg" = "$1" ] || continue
     splash_target "$pkg" "$rel"
     if skipped "$pkg"; then st=skipped
     elif [ ! -d "$_sb" ] && [ ! -d "/data/data/$pkg" ]; then st=absent
     elif splash_is_locked "$_st"; then st=locked
+    elif splash_is_weak "$_st"; then st=weak
     else st=pending; fi
+    printf '%s\t%s\t%s\n' "$pkg" "$rel" "$st"
+  done
+}
+splash_locked_count() { splash_states | awk '$3=="locked" {apps[$1]=1} END {for (p in apps) n++; print n+0}'; }
+splash_hits_json() {
+  printf '{"rules":['
+  first=1
+  splash_states "${1:-}" | while read -r pkg rel st; do
     [ $first = 1 ] || printf ','; first=0
     printf '{"pkg":"%s","path":"%s","state":"%s"}' "$(json_esc "$pkg")" "$(json_esc "$rel")" "$st"
   done
@@ -774,7 +885,7 @@ sources_json() {
 # interval_h / splash_* / url / sources(数量) / sources_ok / user_rules / allow_count / block_count）
 stats_json() {
   mode=$(shield_mode)
-  locked=0; [ -f "$AD_DIR/locked.list" ] && locked=$(cut -d' ' -f1 "$AD_DIR/locked.list" | sort -u | wc -l | tr -d ' ')
+  locked=$(splash_locked_count)
   skip=$(cnt_lines "$SKIP")
   user_rules=$(cnt_lines "$USER_RULES"); allow_n=$(cnt_lines "$ALLOW"); block_n=$(cnt_lines "$BLOCK")
   ids=$(active_ids); srcs=$(echo $ids | wc -w)
@@ -802,7 +913,7 @@ stats_json() {
 
 # 一行摘要（status.sh / xguard status 用）
 shield_summary() {
-  n=$(cut -d" " -f1 "$AD_DIR/locked.list" 2>/dev/null | sort -u | wc -l | tr -d ' '); r=$(hosts_rules)
+  n=$(splash_locked_count); r=$(hosts_rules)
   sr=$(splash_rules | grep -c .)
   if [ "${sr:-0}" -eq 0 ]; then sp=""; else sp=" · 锁定 $n 个开屏"; fi
   ns=$(active_ids | grep -c .)
@@ -818,7 +929,7 @@ shield_summary() {
 # 契约状态文件 $XG_DATA/shield/status.json（App / WebUI 只读）
 shield_write_status() {
   mode=$(shield_mode)
-  locked=0; [ -f "$AD_DIR/locked.list" ] && locked=$(cut -d' ' -f1 "$AD_DIR/locked.list" | sort -u | wc -l | tr -d ' ')
+  locked=$(splash_locked_count)
   core_status_write $SHIELD summary="${1:-$(shield_summary)}" mode="$mode" method="$(shield_method)" hosts_rules="$(hosts_rules)" \
     last_ok="$(prop_get "$META" last_ok 0)" result="$(prop_get "$META" result none)" sources="$(active_ids | grep -c .)" \
     splash_locked_apps="$locked" splash_skipped_apps="$(cnt_lines "$SKIP")" \

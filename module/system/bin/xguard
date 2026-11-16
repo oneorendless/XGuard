@@ -1,4 +1,8 @@
 #!/system/bin/sh
+if [ "${XGUARD_GLOBAL_NS:-0}" != 1 ] && [ "$(id -u)" = 0 ] && command -v nsenter >/dev/null 2>&1; then
+  export XGUARD_GLOBAL_NS=1
+  exec nsenter -t 1 -m -- sh "$0" "$@"
+fi
 # 防护引擎 Lite 命令行入口：WebUI、管理器与终端共用。
 XG_MODDIR=${XG_MODDIR:-/data/adb/modules/xguard}; export XG_MODDIR
 . "$XG_MODDIR/core/lib.sh"
