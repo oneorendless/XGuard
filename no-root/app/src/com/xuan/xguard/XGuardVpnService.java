@@ -50,7 +50,7 @@ public final class XGuardVpnService extends VpnService {
             if (!getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("enabled",false)) { shutdown(); return; }
             if (!running && (worker==null || !worker.isAlive()) && VpnService.prepare(XGuardVpnService.this)==null) onStartCommand(null,0,0);
             getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, notification());
-            healthHandler.postDelayed(this, 15000);
+            healthHandler.postDelayed(this, 60000);
         }
     };
 
@@ -67,7 +67,7 @@ public final class XGuardVpnService extends VpnService {
         if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         else if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification(), 0);
         else startForeground(NOTIFICATION_ID, notification());
-        healthHandler.postDelayed(healthTick, 15000);
+        healthHandler.postDelayed(healthTick, 60000);
     }
 
     @Override public int onStartCommand(Intent intent, int flags, int startId) {

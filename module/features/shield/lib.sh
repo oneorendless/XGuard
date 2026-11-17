@@ -791,28 +791,44 @@ splash_network_off() {
   for _ipt in iptables ip6tables; do
     command -v "$_ipt" >/dev/null 2>&1 || continue
     while "$_ipt" -w -D OUTPUT -j XGUARD_SPLASH 2>/dev/null; do :; done
-    "$_ipt" -w -F XGUARD_SPLASH 2>/dev/null; "$_ipt" -w -X XGUARD_SPLASH 2>/dev/null
+    "$_ipt" -w -F XGUARD_SPLASH 2>/dev/null
+    "$_ipt" -w -F XGUARD_SPLASH_HOST 2>/dev/null
+    "$_ipt" -w -X XGUARD_SPLASH_HOST 2>/dev/null
+    "$_ipt" -w -X XGUARD_SPLASH 2>/dev/null
   done
   return 0
 }
 splash_network_sync() {
-  _uid=$(stat -c %u /data/user/0/com.xunlei.downloadprovider 2>/dev/null)
-  case "$_uid" in ''|*[!0-9]*) _uid=0 ;; esac
-  _wanted=0
-  if feat_enabled "$SHIELD" && ! shield_paused && ! skipped com.xunlei.downloadprovider && [ "$_uid" -ge 10000 ]; then _wanted=1; fi
+  _uids=""
+  if feat_enabled "$SHIELD" && ! shield_paused; then
+    for _pkg in com.chaoxing.mobile com.chinamobile.mcloud com.xunlei.downloadprovider; do
+      skipped "$_pkg" && continue
+      _uid=$(stat -c %u /data/user/0/$_pkg 2>/dev/null)
+      case "$_uid" in ''|*[!0-9]*) continue ;; esac
+      [ "$_uid" -ge 10000 ] || continue
+      case " $_uids " in *" $_uid "*) ;; *) _uids="$_uids $_uid" ;; esac
+    done
+  fi
   for _ipt in iptables ip6tables; do
     command -v "$_ipt" >/dev/null 2>&1 || continue
-    if [ "$_wanted" = 0 ]; then
+    if [ -z "$_uids" ]; then
       while "$_ipt" -w -D OUTPUT -j XGUARD_SPLASH 2>/dev/null; do :; done
-      "$_ipt" -w -F XGUARD_SPLASH 2>/dev/null; "$_ipt" -w -X XGUARD_SPLASH 2>/dev/null
+      "$_ipt" -w -F XGUARD_SPLASH 2>/dev/null
+      "$_ipt" -w -F XGUARD_SPLASH_HOST 2>/dev/null
+      "$_ipt" -w -X XGUARD_SPLASH_HOST 2>/dev/null
+      "$_ipt" -w -X XGUARD_SPLASH 2>/dev/null
       continue
     fi
-    _signature=$(printf '%s\n%s\n%s' "$_uid" "$(cksum "$XG_FDIR/rules/splash-domains.list")" "$(cksum "$ALLOW" 2>/dev/null)" | cksum | awk '{print $1}')
-    if "$_ipt" -w -C XGUARD_SPLASH -m comment --comment "xguard-$_signature" -j RETURN 2>/dev/null && "$_ipt" -w -C OUTPUT -j XGUARD_SPLASH 2>/dev/null; then continue; fi
+    _signature=$(printf '%s\n%s\n%s' "$_uids" "$(cksum "$XG_FDIR/rules/splash-domains.list")" "$(cksum "$ALLOW" 2>/dev/null)" | cksum | awk '{print $1}')
+    if "$_ipt" -w -C XGUARD_SPLASH_HOST -m comment --comment "xguard-$_signature" -j RETURN 2>/dev/null && "$_ipt" -w -C OUTPUT -j XGUARD_SPLASH 2>/dev/null; then continue; fi
     "$_ipt" -w -N XGUARD_SPLASH 2>/dev/null
     "$_ipt" -w -F XGUARD_SPLASH 2>/dev/null || continue
-    "$_ipt" -w -A XGUARD_SPLASH -m owner ! --uid-owner "$_uid" -j RETURN
+    "$_ipt" -w -N XGUARD_SPLASH_HOST 2>/dev/null
+    "$_ipt" -w -F XGUARD_SPLASH_HOST 2>/dev/null || continue
     _ok=1
+    for _uid in $_uids; do
+      "$_ipt" -w -A XGUARD_SPLASH -p tcp -m owner --uid-owner "$_uid" -j XGUARD_SPLASH_HOST 2>/dev/null || _ok=0
+    done
     grep -vE '^[[:space:]]*(#|$)' "$XG_FDIR/rules/splash-domains.list" | while read -r _host; do
       _allowed=0; _suffix=$_host
       [ -f "$ALLOW" ] && grep -Fixq "$_host" "$ALLOW" && _allowed=1
@@ -821,13 +837,15 @@ splash_network_sync() {
         case "$_suffix" in *.*) _suffix=${_suffix#*.} ;; *) break ;; esac
       done
       [ "$_allowed" = 0 ] || continue
-      "$_ipt" -w -A XGUARD_SPLASH -p tcp -m owner --uid-owner "$_uid" -m string --algo kmp --string "$_host" -j REJECT --reject-with tcp-reset 2>/dev/null || exit 1
+      valid_domain "$_host" || exit 1
+      "$_ipt" -w -A XGUARD_SPLASH_HOST -p tcp -m string --algo kmp --string "$_host" -j REJECT --reject-with tcp-reset 2>/dev/null || exit 1
     done || _ok=0
     if [ "$_ok" = 1 ]; then
-      "$_ipt" -w -A XGUARD_SPLASH -m comment --comment "xguard-$_signature" -j RETURN
+      "$_ipt" -w -A XGUARD_SPLASH_HOST -m comment --comment "xguard-$_signature" -j RETURN
       "$_ipt" -w -C OUTPUT -j XGUARD_SPLASH 2>/dev/null || "$_ipt" -w -I OUTPUT 1 -j XGUARD_SPLASH
     else
       "$_ipt" -w -F XGUARD_SPLASH 2>/dev/null
+      "$_ipt" -w -F XGUARD_SPLASH_HOST 2>/dev/null
       log "$SHIELD" "$_ipt 不支持广告主机补防，仍使用 hosts 与缓存锁定"
     fi
   done

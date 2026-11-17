@@ -13,7 +13,131 @@ let hitRules = [];
 let userRules = [];
 let candidates = [];
 const appInfo = new Map();
-const appNames = { 'com.xunlei.downloadprovider':'迅雷', 'tv.danmaku.bili':'哔哩哔哩', 'com.zhihu.android':'知乎', 'com.autonavi.minimap':'高德地图', 'com.taobao.idlefish':'闲鱼', 'com.tencent.mobileqq':'QQ', 'com.netease.cloudmusic':'网易云音乐', 'cn.kuwo.player':'酷我音乐', 'cn.damai':'大麦', 'cn.missevan':'猫耳FM', 'com.sf.activity':'顺丰速运', 'com.anjuke.android.app':'安居客', 'com.mihoyo.hyperion':'米游社', 'com.umetrip.android.msky.app':'航旅纵横', 'ctrip.android.view':'携程旅行', 'com.hexin.plat.android':'同花顺', 'com.cn21.ecloud':'天翼云盘', 'com.xiaomi.smarthome':'米家' };
+const appNames = { 'com.xunlei.downloadprovider':'迅雷', 'com.chaoxing.mobile':'学习通', 'com.chinamobile.mcloud':'中国移动云盘', 'tv.danmaku.bili':'哔哩哔哩', 'com.zhihu.android':'知乎', 'com.autonavi.minimap':'高德地图', 'com.taobao.idlefish':'闲鱼', 'com.tencent.mobileqq':'QQ', 'com.netease.cloudmusic':'网易云音乐', 'cn.kuwo.player':'酷我音乐', 'cn.damai':'大麦', 'cn.missevan':'猫耳FM', 'com.sf.activity':'顺丰速运', 'com.anjuke.android.app':'安居客', 'com.mihoyo.hyperion':'米游社', 'com.umetrip.android.msky.app':'航旅纵横', 'ctrip.android.view':'携程旅行', 'com.hexin.plat.android':'同花顺', 'com.cn21.ecloud':'天翼云盘', 'com.xiaomi.smarthome':'米家' };
+let gkdBusy = false;
+function installGkdPage() {
+  if (!element('gkd')) {
+    const page = document.createElement('section'); page.id = 'gkd'; page.className = 'page'; page.hidden = true;
+    page.innerHTML = '<div class="page-heading"><p class="eyebrow">GKD UI RULES</p><h1>自动跳过，按订阅选择。</h1><p class="muted">规则来源逐项启停，也可以下载自己的 HTTPS GKD 订阅。</p></div><article class="notice featured-support"><label class="row" for="gkd-hide-recents"><span><b>隐藏最近任务</b><small id="gkd-recents-state">从系统最近任务列表中隐藏 XGuard</small></span><input id="gkd-hide-recents" type="checkbox" role="switch"></label></article><article class="notice"><b>权限状态</b><p id="gkd-state" class="muted micro"></p><div class="row"><span><b>本地 VPN</b><small id="permission-root-state"></small></span></div><div class="row"><span><b>无障碍服务</b><small id="permission-accessibility-state"></small></span><button id="permission-accessibility" class="secondary">授权无障碍</button></div><label class="row" for="gkd-accessibility-guard"><span><b>无障碍守护</b><small>每 2 分钟检查一次，掉线后尝试恢复 XGuard 服务</small></span><input id="gkd-accessibility-guard" type="checkbox" role="switch"></label><button id="gkd-authorize" class="secondary full">打开首次权限向导</button></article><article class="card list" id="gkd-source-list"></article><article class="card"><label for="gkd-source-url">在线 GKD 订阅地址</label><input id="gkd-source-url" type="url" placeholder="https://example.com/gkd.json5" autocapitalize="off" spellcheck="false"><button id="gkd-source-add" class="primary full">下载并添加订阅</button><button id="gkd-update" class="secondary full">更新已勾选订阅</button><p id="gkd-download-state" class="muted micro" role="status"></p><p class="muted micro">只导入可安全解析的开屏规则；复杂关系、前置条件和不支持属性会整条跳过。</p></article><p id="gkd-last-action" class="muted micro"></p>';
+    document.querySelector('main').insertBefore(page, document.querySelector('#settings'));
+    const nav = document.querySelector('.bottom-nav'); const settings = nav.querySelector('[data-tab=settings]');
+    const button = document.createElement('button'); button.dataset.tab = 'gkd'; button.setAttribute('aria-selected', 'false'); button.innerHTML = '<svg><use href="#i-rules"/></svg><span>GKD</span>'; nav.insertBefore(button, settings);
+  }
+  element('gkd-source-add').onclick = () => gkdTask(async () => {
+    const address = element('gkd-source-url').value.trim();
+    if (!/^https:\/\/\S+$/i.test(address)) throw new Error('请输入 HTTPS 订阅地址');
+    renderGkdSources(await json(exec(['gkd', 'add', address])));
+    element('gkd-source-url').value = '';
+    toast('订阅已下载并勾选；需要无障碍权限才能执行');
+  });
+  element('gkd-update').onclick = () => updateGkd();
+  element('gkd-accessibility-guard').disabled = true;
+  element('gkd-accessibility-guard').closest('label').querySelector('small').textContent = '自动恢复需使用 Root 模块版；本版掉线后请重新开启无障碍';
+  element('gkd-authorize').onclick = () => showPermissionGuide();
+  element('permission-accessibility').onclick = () => window.XGuard?.openAccessibilitySettings?.();
+  element('gkd-hide-recents').closest('article').classList.add('gkd-recents-card');
+  element('gkd-hide-recents').onchange = () => {
+    const toggle = element('gkd-hide-recents');
+    try {
+      if (typeof window.XGuard?.setHideFromRecents !== 'function') throw new Error('当前版本不支持隐藏最近任务');
+      window.XGuard.setHideFromRecents(toggle.checked);
+      syncRecentTaskToggle();
+      toast(toggle.checked ? '已隐藏最近任务中的 XGuard' : '已显示 XGuard 最近任务');
+    } catch (error) {
+      toggle.checked = !toggle.checked;
+      syncRecentTaskToggle();
+      toast(error.message || String(error));
+    }
+  };
+}
+async function gkdTask(handler) {
+  if (gkdBusy) return;
+  if (!window.XGuard) { toast('请在 XGuard App 中管理无障碍订阅'); return; }
+  gkdBusy = true;
+  element('gkd').setAttribute('aria-busy', 'true');
+  for (const control of element('gkd').querySelectorAll('button,input')) control.disabled = true;
+  element('gkd-download-state').textContent = '正在处理，请稍候…';
+  try { await handler(); element('gkd-download-state').textContent = ''; }
+  catch (error) { element('gkd-download-state').textContent = error.message; toast(error.message); await loadGkd().catch(() => {}); }
+  finally {
+    gkdBusy = false;
+    element('gkd').setAttribute('aria-busy', 'false');
+    for (const control of element('gkd').querySelectorAll('button,input')) control.disabled = false;
+    syncPermissionGuide();
+  }
+}
+async function loadGkd() {
+  if (!window.XGuard) { element('gkd-state').textContent = '无障碍订阅请在 XGuard App 中使用'; return; }
+  renderGkdSources(await json(exec(['gkd', 'sources'])));
+}
+function renderGkdSources(payload) {
+  const host = element('gkd-source-list');
+  host.replaceChildren();
+  for (const source of payload.list || []) {
+    const wrapper = document.createElement('div'); wrapper.className = 'gkd-source';
+    const toggle = document.createElement('input'); toggle.type = 'checkbox'; toggle.checked = Boolean(source.enabled); toggle.setAttribute('aria-label', source.name);
+    toggle.onchange = () => gkdTask(async () => {
+      renderGkdSources(await json(exec(['gkd', 'toggle', source.id, toggle.checked ? '1' : '0'])));
+      toast(toggle.checked ? '已勾选此订阅' : '已停用此订阅');
+    });
+    wrapper.append(row(source.name, number(source.count) + ' 条可执行 · ' + number(source.skipped) + ' 条未导入 · ' + source.result, toggle));
+    const detail = document.createElement('small'); detail.className = 'muted micro'; detail.textContent = source.desc + (source.url ? '\n' + source.url : ''); wrapper.append(detail);
+    if (source.url) {
+      const actions = document.createElement('div'); actions.className = 'actions';
+      const update = document.createElement('button'); update.textContent = '更新此订阅'; update.onclick = () => updateGkd(source.id); actions.append(update);
+      if (source.custom) {
+        const remove = document.createElement('button'); remove.textContent = '删除';
+        remove.onclick = () => gkdTask(async () => { if (await confirmAction('删除订阅', '删除此来源的本地规则缓存和选择状态。')) renderGkdSources(await json(exec(['gkd', 'remove', source.id]))); });
+        actions.append(remove);
+      }
+      wrapper.append(actions);
+    }
+    host.append(wrapper);
+  }
+  element('gkd-last-action').textContent = payload.last_action ? '最近执行：' + payload.last_action + ' · ' + new Date(payload.last_action_at).toLocaleString('zh-CN') : '尚无执行记录';
+  element('gkd-accessibility-guard').checked = Boolean(payload.accessibility_guard);
+  syncPermissionGuide();
+}
+function updateGkd(id = '') {
+  return gkdTask(async () => {
+    const result = await json(exec(['gkd', 'update', id]));
+    await loadGkd();
+    const message = '更新成功 ' + result.updated + ' 个来源' + (result.failed ? '，失败 ' + result.failed + ' 个，旧缓存已保留：' + result.errors.join('；') : '');
+    toast(message);
+    if (result.failed) element('gkd-download-state').textContent = message;
+  });
+}
+function syncPermissionGuide() {
+  const bridge = window.XGuard;
+  const supported = typeof bridge?.isAccessibilityEnabled === 'function';
+  const enabled = supported && Boolean(bridge.isAccessibilityEnabled());
+  element('permission-accessibility-state').textContent = enabled ? '已授权' : '未授权';
+  element('gkd-accessibility-guard').disabled = true;
+  element('permission-accessibility').textContent = enabled ? '管理无障碍权限' : '授权无障碍';
+  element('gkd-state').textContent = enabled ? '无障碍已授权，按已勾选的订阅执行' : '无障碍未授权，订阅可以下载，暂不执行点击';
+  const vpnReady = Boolean(bridge?.isVpnPrepared?.());
+  element('permission-root-state').textContent = vpnReady ? '已连接' : '等待授权';
+  const rootAccessibility = element('root-accessibility-state'); if (rootAccessibility) rootAccessibility.textContent = enabled ? '已授权' : '未授权';
+  if (enabled && vpnReady) element('root-later').textContent = '完成';
+  syncRecentTaskToggle();
+}
+function syncRecentTaskToggle() {
+  const toggle = element('gkd-hide-recents');
+  const state = element('gkd-recents-state');
+  if (!toggle) return;
+  const supported = typeof window.XGuard?.getHideFromRecents === 'function' && typeof window.XGuard?.setHideFromRecents === 'function';
+  toggle.disabled = !supported || gkdBusy;
+  if (!supported) { if (state) state.textContent = '当前版本不支持此设置'; return; }
+  const hidden = Boolean(window.XGuard.getHideFromRecents());
+  toggle.checked = hidden;
+  if (state) state.textContent = hidden ? '已隐藏 XGuard；可从桌面图标再次打开' : '在系统最近任务列表中隐藏 XGuard，设置自动保存';
+}
+function showPermissionGuide() {
+  syncPermissionGuide();
+  if (!element('root-dialog').open) element('root-dialog').showModal();
+}
+window.xguardPermissionsChanged = () => syncPermissionGuide();
+document.addEventListener('visibilitychange', () => { if (!document.hidden) { syncPermissionGuide(); if (activeTab === 'gkd') void loadGkd().catch(error => toast(error.message)); } });
 const isVpnMode = () => Boolean(window.XGuard?.getMode && window.XGuard.getMode() === 'vpn');
 let toastTimer;
 let pending = false;
@@ -29,7 +153,7 @@ let domainLoadSequence = 0;
 const tabLoads = new Map();
 const tabLoadedAt = new Map();
 const noRoot = Boolean(window.XGuard && ((window.XGuard.getMode && window.XGuard.getMode() === 'vpn') || window.XGuard.mode === 'vpn'));
-let rootReady = noRoot || !window.XGuard;
+let rootReady = noRoot ? Boolean(window.XGuard?.isVpnPrepared?.()) : !window.XGuard;
 try { rootReady = rootReady || localStorage.getItem('xguard.rootConfirmed.v1') === '1'; } catch {}
 
 function exec(args) {
@@ -127,6 +251,7 @@ async function refresh() {
   await loadTab(true);
 }
 function loadTab(force = false) {
+  if (activeTab === 'gkd') return loadGkd();
   if (!status) return Promise.resolve();
   const id = activeTab;
   if (id === 'home' || id === 'settings') return Promise.resolve();
@@ -246,7 +371,7 @@ function switchPage(id) {
   activeTab = id; document.querySelectorAll('.page').forEach(page => { page.hidden = page.id !== id; });
   document.querySelectorAll('nav button').forEach(tab => tab.setAttribute('aria-selected', String(tab.dataset.tab === id)));
   clearInterval(activityTimer); activityTimer = null; window.scrollTo(0, 0);
-  if (id === 'activity') activityTimer = setInterval(() => { if (!document.hidden && !pending) loadActivity(); }, 2000);
+  if (id === 'activity') activityTimer = setInterval(() => { if (!document.hidden && !pending) loadActivity(); }, 5000);
   if (id === 'activity' && activityPayload) renderActivity();
   if (id === 'home') void loadActivity();
   // Navigation never waits for su / network / list loading. Each tab deduplicates
@@ -349,6 +474,7 @@ function renderHits() {
 }
 async function addRule(pkg, path) { requireEnabled(); if (isVpnMode()) throw new Error('缓存锁定需要 Root'); if (!/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/.test(pkg) || !path) throw new Error('请填写有效包名与路径'); toast('正在保存此应用的规则…'); await run('rules', 'add', pkg, path); await reloadSplashApp(pkg); const saved = hitRules.find(rule => rule.pkg === pkg && rule.path === path); toast(saved?.state === 'locked' ? '规则已保存，目录已锁定' : saved?.state === 'weak' ? '规则已保存，文件系统仅支持弱占位' : '规则已保存，应用未安装或目录暂不可锁定'); }
 
+installGkdPage();
 document.querySelectorAll('nav button').forEach(control => { control.onclick = () => switchPage(control.dataset.tab); });
 element('refresh').onclick = () => { if (!rootReady && window.XGuard) element('root-dialog').showModal(); else task(refresh, element('refresh')); };
 element('toggle').onclick = () => task(async () => { if (status.safe_mode) throw new Error('请先关闭安全模式并重启'); if (noRoot && window.XGuard.isVpnPrepared && !window.XGuard.isVpnPrepared()) await requestVpnAccess(); await exec([status.features[0].enabled ? 'disable' : 'enable', 'shield']); await refresh(); }, element('toggle'));
@@ -453,7 +579,7 @@ function renderPause() {
   const feature=status?.features?.[0], until=Number(recovery?.pause_until ?? feature?.pause_until ?? 0), seconds=Math.max(0,Math.ceil(until-Date.now()/1000));
   element('pause-countdown').textContent=until>0 ? seconds>0 ? Math.floor(seconds/60)+' 分 '+seconds%60+' 秒后恢复' : '正在恢复防护…' : '按需临时暂停';
   element('pause-protection').textContent=until>0?'立即恢复':'暂停 5 分钟'; element('pause-protection').disabled=!feature?.enabled;
-  element('pause-note').textContent=isVpnMode()?'临时暂停只停止 DNS 拦截，VPN 继续转发 DNS；到期自动恢复。':'临时暂停 hosts、网络补防和缓存锁定；后台约 15 秒检查一次，到期恢复。';
+  element('pause-note').textContent=isVpnMode()?'临时暂停只停止 DNS 拦截，VPN 继续转发 DNS；到期自动恢复。':'临时暂停 hosts、网络补防和缓存锁定；后台约 1 分钟检查一次，到期恢复。';
 }
 function renderRecovery() {
   renderPause();
@@ -498,6 +624,16 @@ element('activity-search').oninput = () => renderActivity(true);
 document.querySelectorAll('[data-filter]').forEach(control => { control.onclick = () => { activityFilter = control.dataset.filter; document.querySelectorAll('[data-filter]').forEach(button => button.setAttribute('aria-selected', String(button === control))); renderActivity(true); }; });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && activeTab === 'activity' && !pending) loadActivity(); });
 element('show-license').onclick = () => element('license-dialog').showModal();
+element('show-gpl-license').onclick = async () => {
+  try {
+    const dialog = document.createElement('dialog'); dialog.className = 'glass';
+    const title = document.createElement('h2'); title.textContent = 'GNU General Public License v3.0';
+    const text = document.createElement('pre'); text.textContent = await exec(['gkd', 'license']);
+    const form = document.createElement('form'); form.method = 'dialog';
+    const close = document.createElement('button'); close.className = 'primary full'; close.textContent = '关闭'; form.append(close);
+    dialog.append(title, text, form); document.body.append(dialog); dialog.addEventListener('close', () => dialog.remove(), {once:true}); dialog.showModal();
+  } catch (error) { toast('GPLv3 条款读取失败：' + error.message); }
+};
 element('show-donate').onclick = () => element('donate-dialog').showModal();
 const depthOptions = {6:['快速扫描 · 6 层', '先查找常见位置，耗时较少'], 8:['标准扫描 · 8 层', '兼顾扫描耗时与目录覆盖'], 12:['深入扫描 · 12 层', '查找更深目录，可能需要更久']};
 function syncScanDepth() {
@@ -516,7 +652,7 @@ if (noRoot) {
   element('runtime').parentElement.querySelector('p:last-child').textContent = '使用 Android 本地 VPN 服务；缓存锁定需要 Root。';
   element('traffic-title').textContent = '拦截统计';
 }
-setInterval(() => { if (activeTab === 'home' && !document.hidden && !pending && status && rootReady) void loadActivity(); }, 5000);
+setInterval(() => { if (activeTab === 'home' && !document.hidden && !pending && status && rootReady) void loadActivity(); }, 10000);
 window.xguardBack = () => {
   const dialog = document.querySelector('dialog[open]');
   if (dialog) { dialog.dispatchEvent(new Event('cancel')); dialog.close(); return true; }
@@ -524,9 +660,11 @@ window.xguardBack = () => {
   return false;
 };
 element('root-later').onclick = () => {
-  element('root-dialog').close(); element('connection').textContent = '尚未开启本地 VPN，点击右上角重新连接';
+  try { localStorage.setItem('xguard.permissions.v091', '1'); } catch {}
+  element('root-dialog').close(); element('connection').textContent = (noRoot && window.XGuard?.isVpnPrepared?.()) ? '本地 VPN 已连接，请开启无障碍服务' : '尚未开启本地 VPN，点击右上角重新连接';
 };
-element('root-dialog').oncancel = () => { element('connection').textContent = '尚未开启本地 VPN，点击右上角重新连接'; };
+element('root-open-accessibility').onclick = () => window.XGuard?.openAccessibilitySettings?.();
+element('root-dialog').oncancel = () => { try { localStorage.setItem('xguard.permissions.v091', '1'); } catch {} element('connection').textContent = (noRoot && window.XGuard?.isVpnPrepared?.()) ? '本地 VPN 已连接，请开启无障碍服务' : '尚未开启本地 VPN，点击右上角重新连接'; };
 function requestVpnAccess() {
   return new Promise((resolve, reject) => {
     const callback = 'xguardCallback' + (++sequence);
@@ -543,7 +681,13 @@ element('root-authorize').onclick = async () => {
     else throw new Error('当前容器不支持本地 VPN，请使用 XGuard App');
     rootReady = true;
     try { localStorage.setItem('xguard.rootConfirmed.v1','1'); } catch {}
-    element('root-dialog').close(); await task(refresh);
+    syncPermissionGuide();
+    if (window.XGuard?.isAccessibilityEnabled?.()) {
+      try { localStorage.setItem('xguard.permissions.v091', '1'); } catch {}
+      element('root-status').textContent = '本地 VPN 与无障碍均已授权';
+      element('root-dialog').close();
+    } else element('root-status').textContent = '本地 VPN 已授权，请开启无障碍服务';
+    await task(refresh);
   } catch (error) { element('root-status').textContent = error.message; }
   finally { control.disabled = false; }
 };
@@ -556,6 +700,11 @@ for (const dialog of document.querySelectorAll('dialog')) {
     }
   });
 }
-if (window.XGuard && !rootReady) { element('root-dialog').showModal(); element('connection').textContent = noRoot ? '等待授予本地 VPN 权限' : '等待授予 Root 权限'; }
+if (window.XGuard && !(noRoot ? Boolean(window.XGuard.isVpnPrepared?.()) : rootReady)) { element('root-dialog').showModal(); element('connection').textContent = noRoot ? '等待授予本地 VPN 权限' : '等待授予 Root 权限'; }
 else if (noRoot && window.XGuard.isVpnPrepared && !window.XGuard.isVpnPrepared()) { element('root-dialog').showModal(); element('connection').textContent = '点击开启本地 VPN 防护'; }
 else void refresh().catch(error => toast(error.message));
+if (window.XGuard?.isAccessibilityEnabled) {
+  syncPermissionGuide();
+  let firstOpen = true; try { firstOpen = localStorage.getItem('xguard.permissions.v091') !== '1'; } catch {}
+  if (firstOpen) showPermissionGuide();
+}

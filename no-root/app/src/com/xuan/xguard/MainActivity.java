@@ -2,6 +2,7 @@ package com.xuan.xguard;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.ActivityManager;
 import android.Manifest;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -88,7 +89,7 @@ public final class MainActivity extends Activity {
         webView.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
-                if ("https".equals(uri.getScheme()) && "github.com".equals(uri.getHost()) && "/oneorendless/XGuard".equals(uri.getPath())) {
+                if ("https".equals(uri.getScheme()) && "github.com".equals(uri.getHost())) {
                     try { startActivity(new Intent(Intent.ACTION_VIEW, uri)); } catch (Exception ignored) { }
                     return true;
                 }
@@ -97,8 +98,8 @@ public final class MainActivity extends Activity {
         });
         webView.addJavascriptInterface(new XGuardBridge(), "XGuard");
         setContentView(webView);
+        applyHideFromRecents();
         webView.loadUrl("file:///android_asset/index.html");
-        new Handler().postDelayed(this::showKeepAlivePromptIfNeeded, 700);
     }
 
     @Override protected void onActivityResult(int requestCode, int resultCode, Intent data) {
@@ -109,6 +110,7 @@ public final class MainActivity extends Activity {
         if (resultCode == RESULT_OK) {
             startVpnService();
             deliver(callback, 0, "VPN permission granted");
+            new Handler().postDelayed(this::showKeepAlivePromptIfNeeded, 700);
         } else deliver(callback, 1, "本地 VPN 权限未授予");
     }
 
@@ -121,6 +123,7 @@ public final class MainActivity extends Activity {
         } else {
             startVpnService();
             deliver(callback, 0, "VPN permission granted");
+            new Handler().postDelayed(this::showKeepAlivePromptIfNeeded, 700);
         }
     }
 
@@ -203,6 +206,27 @@ public final class MainActivity extends Activity {
         super.onDestroy();
     }
 
+    private void applyHideFromRecents() {
+        boolean hidden = getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("hide_from_recents", false);
+        try {
+            ActivityManager manager = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+            if (manager == null) return;
+            int currentTaskId = getTaskId();
+            for (ActivityManager.AppTask task : manager.getAppTasks()) {
+                ActivityManager.RecentTaskInfo info = task.getTaskInfo();
+                if (info != null && info.id == currentTaskId) {
+                    task.setExcludeFromRecents(hidden);
+                    return;
+                }
+            }
+        } catch (Exception ignored) { }
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if (webView != null) webView.post(() -> webView.evaluateJavascript("window.xguardPermissionsChanged && window.xguardPermissionsChanged()", null));
+    }
+
     private final class XGuardBridge {
         @JavascriptInterface public String getMode() { return "vpn"; }
         @JavascriptInterface public boolean isVpnPrepared() { return VpnService.prepare(MainActivity.this) == null; }
@@ -226,8 +250,26 @@ public final class MainActivity extends Activity {
         @JavascriptInterface public void haptic() {
             runOnUiThread(() -> { if (webView != null && !isFinishing()) webView.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK); });
         }
-        @JavascriptInterface public void requestRoot(String callback) { MainActivity.this.requestVpn(callback); }
-        @JavascriptInterface public void requestVpn(String callback) { MainActivity.this.requestVpn(callback); }
+        @JavascriptInterface public boolean getHideFromRecents() { return getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("hide_from_recents", false); }
+        @JavascriptInterface public void setHideFromRecents(final boolean hidden) {
+            getSharedPreferences("xguard", MODE_PRIVATE).edit().putBoolean("hide_from_recents", hidden).apply();
+            runOnUiThread(MainActivity.this::applyHideFromRecents);
+        }
+        @JavascriptInterface public void setUiRulesEnabled(boolean enabled) {
+            getSharedPreferences("xguard", MODE_PRIVATE).edit().putBoolean("ui_rules_enabled", enabled).apply();
+        }
+        @JavascriptInterface public boolean getUiRulesEnabled() { return getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("ui_rules_enabled", false); }
+        @JavascriptInterface public boolean getUiRuleSource(String source) { return getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("ui_source_" + source, true); }
+        @JavascriptInterface public void setUiRuleSource(String source, boolean enabled) {
+            if (source == null || !source.matches("[a-z0-9-]+")) return;
+            getSharedPreferences("xguard", MODE_PRIVATE).edit().putBoolean("ui_source_" + source, enabled).apply();
+        }
+        @JavascriptInterface public void openAccessibilitySettings() {
+            try { startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)); } catch (Exception ignored) { }
+        }
+        @JavascriptInterface public boolean isAccessibilityEnabled() { return GkdPermissions.enabled(MainActivity.this); }
+        @JavascriptInterface public void requestRoot(String callback) { runOnUiThread(() -> MainActivity.this.requestVpn(callback)); }
+        @JavascriptInterface public void requestVpn(String callback) { runOnUiThread(() -> MainActivity.this.requestVpn(callback)); }
         @JavascriptInterface public void execute(final String arguments, final String callback) {
             if (callback == null || !callback.matches("xguardCallback[0-9]+")) return;
             executor.execute(() -> {
@@ -241,6 +283,7 @@ public final class MainActivity extends Activity {
         private String dispatch(JSONArray values) throws Exception {
             if (values.length() == 0) throw new IllegalArgumentException("缺少操作");
             String command = values.getString(0);
+            if ("gkd".equals(command)) return GkdStore.handle(MainActivity.this, values);
             if ("apps".equals(command)) return AppCatalog.describe(MainActivity.this, values);
             if ("status".equals(command)) return statusJson();
             if ("log".equals(command)) {
@@ -273,7 +316,7 @@ public final class MainActivity extends Activity {
             boolean enabled = getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("enabled", false);
             boolean running = XGuardVpnService.isRunning(), paused = RecoveryStore.isPaused(MainActivity.this);
             JSONObject feature = new JSONObject(); feature.put("enabled", enabled); feature.put("conflict", false); feature.put("health", enabled && !running ? "VPN 服务未运行" : "ok"); feature.put("pause_until", paused ? RecoveryStore.pausedUntil(MainActivity.this) : 0); feature.put("summary", !enabled ? "点击开关开启本地 VPN 防护" : !running ? "防护已开启，但 VPN 服务未运行，请检查并修复" : paused ? "临时暂停 DNS 拦截，VPN 继续转发 DNS" : "本地 VPN 正在拦截广告域名");
-            JSONObject result = new JSONObject(); result.put("root", "无 Root · Android VPN"); result.put("daemon", running ? "前台服务运行中" : "未运行"); result.put("safe_mode", false); result.put("version", "0.8.7"); result.put("features", new JSONArray().put(feature));
+            JSONObject result = new JSONObject(); result.put("root", "无 Root · Android VPN"); result.put("daemon", running ? "前台服务运行中" : "未运行"); result.put("safe_mode", false); result.put("version", "v0.9.2-noroot"); result.put("features", new JSONArray().put(feature));
             return result.toString();
         }
         private String statsJson(SharedPreferences prefs) throws Exception {
@@ -344,7 +387,7 @@ public final class MainActivity extends Activity {
             for (String address : spec.urls) {
                 HttpURLConnection connection = null;
                 try {
-                    connection = (HttpURLConnection) new URL(address).openConnection(); connection.setConnectTimeout(10000); connection.setReadTimeout(30000); connection.setInstanceFollowRedirects(true); connection.setRequestProperty("User-Agent", "XGuard/0.8.7");
+                    connection = (HttpURLConnection) new URL(address).openConnection(); connection.setConnectTimeout(10000); connection.setReadTimeout(30000); connection.setInstanceFollowRedirects(true); connection.setRequestProperty("User-Agent", "XGuard/0.9.2");
                     if (connection.getResponseCode() / 100 != 2) continue;
                     try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8)); BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(temp), StandardCharsets.UTF_8))) {
                         String line; long bytes = 0; while ((line = reader.readLine()) != null) { bytes += line.length() + 1; if (bytes > 20L * 1024L * 1024L) throw new IOException("订阅过大"); writer.write(line); writer.newLine(); }

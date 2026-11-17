@@ -1,7 +1,7 @@
 # 开屏广告缓存锁定规则：包名<TAB或空格>相对 /data/data/<包名>/ 的路径；@sdcard: 前缀 = 相对 /data/media/0/Android/data/<包名>/
 # 处理方式（v0.2.24，参考 Adguard-Home-For-Magisk-Mod 的 NoAdsService.sh / lingeringsound 去广告模块）：
 #   目录 → 清空后 chattr +i（空且不可变，App 写不进素材也删不掉）；文件 → 清空后 chattr +i。
-#   仅处理已安装 App；缺少的父目录继承其权限和 SELinux 标签创建，后台每 30 秒补锁。
+#   仅处理已安装 App；缺少的父目录继承其权限和 SELinux 标签创建，后台每 120 秒补锁。
 # 解锁：xguard run shield unlock <包名>（chattr -i）
 # 以下条目摘自 liuzq2002/Adguard-Home-For-Magisk-Mod scripts/NoAdsService.sh（commit 0a0717ba），
 # 只保留名字明确是开屏 / 广告缓存的路径；会影响资源更新、配置文件（shared_prefs）、图片缓存的条目没有收录。
@@ -28,6 +28,21 @@ com.hexin.plat.android          cache/splash_images
 com.cn21.ecloud                 files/ecloud_current_screenad.obj
 com.xiaomi.smarthome            files/sh_ads_file
 
+com.chaoxing.mobile             cache/splash
+com.chaoxing.mobile             cache/splash_ad
+com.chaoxing.mobile             cache/ad
+com.chaoxing.mobile             files/splash
+com.chaoxing.mobile             files/ad
+com.chaoxing.mobile             @sdcard:cache/splash
+
+com.chinamobile.mcloud          cache/splash
+com.chinamobile.mcloud          cache/ad
+com.chinamobile.mcloud          cache/adImage
+com.chinamobile.mcloud          files/adImage
+com.chinamobile.mcloud          files/boot_logo
+com.chinamobile.mcloud          @sdcard:files/adImage
+com.chinamobile.mcloud          @sdcard:files/boot_logo
+
 # 迅雷 25.3.10.294：合并用户 FullAdCacheRules，并在实机确认 roip 广告缓存。
 # 覆盖多个广告 SDK 的素材目录；可在界面单独解锁，不触碰下载、账号或数据库。
 com.xunlei.downloadprovider     cache/afs/splash
@@ -40,3 +55,6 @@ com.xunlei.downloadprovider     @sdcard:cache/ksadsdk
 com.xunlei.downloadprovider     @sdcard:cache/pangle_com.byted.pangle
 com.xunlei.downloadprovider     @sdcard:files/Download/pangle_com.byted.pangle
 com.xunlei.downloadprovider     cache/roip_ad_cache
+com.xunlei.downloadprovider     files/roip_ad
+com.xunlei.downloadprovider     files/noah_ads
+com.xunlei.downloadprovider     @sdcard:files/roip_ad

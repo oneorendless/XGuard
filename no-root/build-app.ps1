@@ -17,7 +17,7 @@ if(-not $env:XGUARD_STORE_PASS){throw '请先设置 XGUARD_STORE_PASS 环境变�
 if(-not $env:XGUARD_KEY_PASS){throw '请先设置 XGUARD_KEY_PASS 环境变量'}
 New-Item -ItemType Directory -Force "$buildRoot/classes","$buildRoot/dex","$buildRoot/assets","$buildRoot/res","$buildRoot/gen" | Out-Null
 Copy-Item "$sourceRoot/app/assets/*" "$buildRoot/assets" -Recurse -Force
-foreach($resourceDir in @('drawable','mipmap-anydpi-v26','mipmap-anydpi-v33','values','values-night')){
+foreach($resourceDir in @('drawable','mipmap-anydpi-v26','mipmap-anydpi-v33','values','values-night','xml')){
     Copy-Item "$sourceRoot/app/res/$resourceDir" "$buildRoot/res" -Recurse -Force
 }
 Copy-Item "$sourceRoot/app/AndroidManifest.xml" "$buildRoot/AndroidManifest.xml" -Force
@@ -42,7 +42,7 @@ if($LASTEXITCODE -ne 0){throw '签名失败'}
 & "$tools/apksigner.bat" verify --verbose "$buildRoot/xguard-no-root.apk"
 if($LASTEXITCODE -ne 0){throw '签名校验失败'}
 $badging=& "$tools/aapt.exe" dump badging "$buildRoot/xguard-no-root.apk"
-if($LASTEXITCODE -ne 0 -or ($badging -join "`n") -notmatch "package: name='com.xuan.xguard' versionCode='80071' versionName='0.8.7-noroot'"){throw '免 Root APK 包名/版本校验失败'}
+if($LASTEXITCODE -ne 0 -or ($badging -join "`n") -notmatch "package: name='com.xuan.xguard' versionCode='90021' versionName='0.9.2-noroot'"){throw '免 Root APK 包名/版本校验失败'}
 $assetZip=[IO.Compression.ZipFile]::OpenRead("$buildRoot/xguard-no-root.apk")
 try {
     foreach($asset in Get-ChildItem "$sourceRoot/app/assets" -Recurse -File){
@@ -54,5 +54,5 @@ try {
         if($actual -ne (Get-FileHash -LiteralPath $asset.FullName).Hash){throw "APK 资源不一致：$relative"}
     }
 }finally{$assetZip.Dispose()}
-Copy-Item "$buildRoot/xguard-no-root.apk" "$sourceRoot/XGuard-v0.8.7-no-root.apk" -Force
-Write-Output "构建完成：$sourceRoot/XGuard-v0.8.7-no-root.apk"
+Copy-Item "$buildRoot/xguard-no-root.apk" "$sourceRoot/XGuard-v0.9.2-no-root.apk" -Force
+Write-Output "构建完成：$sourceRoot/XGuard-v0.9.2-no-root.apk"

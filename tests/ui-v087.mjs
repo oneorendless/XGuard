@@ -14,7 +14,7 @@ for(const vpn of [false,true]) {
   await page.addInitScript(vpn=>{
     localStorage.setItem('xguard.rootConfirmed.v1','1');
     let until=0,undo=true,backup=1700000000; window.calls=[];
-    window.XGuard={getMode:()=>vpn?'vpn':'root',haptic(){},execute(raw,callback){
+    window.XGuard={getMode:()=>vpn?'vpn':'root',isVpnPrepared:()=>true,haptic(){},execute(raw,callback){
       const a=JSON.parse(raw); window.calls.push(a); let result={}; const op=a[3];
       if(a[0]==='status') result={version:'0.8.7',root:'test',daemon:'running',features:[{enabled:true,health:'ok',pause_until:until,summary:'test'}]};
       if(a[2]==='stats') result={hosts_rules:100,mode:'hosts',sources:1,hosts_max:200000};

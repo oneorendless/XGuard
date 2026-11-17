@@ -23,7 +23,8 @@
   --shadow: 0 10px 30px rgba(0,0,0,.055), 0 2px 8px rgba(0,0,0,.02);
   --scrim: rgba(0,0,0,.28);
   --glass-blur: 6px;
-  --nav-lens-tint: rgba(255,255,255,.16);
+  --nav-surface-tint: rgba(255,255,255,.20);
+  --nav-lens-tint: rgba(255,255,255,.13);
   --nav-lens-sheen: rgba(255,255,255,.22);
   --nav-lens-rim: rgba(255,255,255,.85);
   --nav-lens-highlight: rgba(255,255,255,.90);
@@ -62,7 +63,8 @@
     --on-surface-rgb: 255,255,255;
     --glass-tint: rgba(28,28,30,.26);
     --dialog-tint: rgba(28,28,30,.48);
-    --nav-lens-tint: rgba(28,28,30,.20);
+    --nav-surface-tint: rgba(28,28,30,.20);
+    --nav-lens-tint: rgba(28,28,30,.16);
     --nav-lens-sheen: rgba(22,119,255,.07);
     --nav-lens-rim: rgba(255,255,255,.13);
     --nav-lens-highlight: rgba(255,255,255,.19);

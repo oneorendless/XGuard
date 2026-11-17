@@ -36,7 +36,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer syscall.Close(fd)
-	syscall.SetsockoptTimeval(fd, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, &syscall.Timeval{Sec: 1})
+	syscall.SetsockoptTimeval(fd, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, &syscall.Timeval{Sec: 5})
 	syscall.SetsockoptInt(fd, syscall.SOL_SOCKET, syscall.SO_RCVBUF, 262144)
 	// Kernel BPF accepts IPv4/IPv6 TCP + UDP only. Deeper bounded parsing happens in userspace.
 	filter := []syscall.SockFilter{{Code: 0x30, K: 0}, {Code: 0x54, K: 0xf0}, {Code: 0x15, Jt: 0, Jf: 4, K: 0x40}, {Code: 0x30, K: 9}, {Code: 0x15, Jt: 6, Jf: 0, K: 6}, {Code: 0x15, Jt: 5, Jf: 0, K: 17}, {Code: 0x06, K: 0}, {Code: 0x15, Jt: 0, Jf: 4, K: 0x60}, {Code: 0x30, K: 6}, {Code: 0x15, Jt: 1, Jf: 0, K: 6}, {Code: 0x15, Jt: 0, Jf: 1, K: 17}, {Code: 0x06, K: 65535}, {Code: 0x06, K: 0}}
@@ -120,7 +120,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, e)
 			return
 		}
-		if time.Since(last) >= time.Second {
+		if time.Since(last) >= 5*time.Second {
 			if _, e := os.Stat(*out + ".clear"); e == nil {
 				state.Items = []event{}
 				seen = map[string]int64{}

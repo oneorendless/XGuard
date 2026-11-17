@@ -1,0 +1,74 @@
+{
+  "id": 9001,
+  "name": "XGuard 本地补充",
+  "version": 1,
+  "author": "Xuan",
+  "apps": [
+    {
+      "id": "com.chaoxing.mobile",
+      "name": "学习通",
+      "groups": [
+        {
+          "key": 1,
+          "name": "开屏广告-跳过控件",
+          "matchTime": 18000,
+          "actionMaximum": 2,
+          "actionCd": 900,
+          "rules": [
+            {
+              "action": "click",
+              "anyMatches": [
+                "[text*=\"跳过\" || desc*=\"跳过\"][text.length<12][desc.length<12][visibleToUser=true]",
+                "[vid=\"tt_splash_skip_btn\" || vid=\"ksad_splash_skip_left_view\" || vid=\"ksad_splash_skip_right_view\"][visibleToUser=true]"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "com.chinamobile.mcloud",
+      "name": "中国移动云盘",
+      "groups": [
+        {
+          "key": 1,
+          "name": "开屏广告-跳过控件",
+          "matchTime": 18000,
+          "actionMaximum": 2,
+          "actionCd": 900,
+          "rules": [
+            {
+              "action": "click",
+              "anyMatches": [
+                "[text*=\"跳过\" || desc*=\"跳过\"][text.length<12][desc.length<12][visibleToUser=true]",
+                "[vid=\"tt_splash_skip_btn\" || vid=\"ksad_splash_skip_left_view\" || vid=\"ksad_splash_skip_right_view\"][visibleToUser=true]"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "com.xunlei.downloadprovider",
+      "name": "迅雷",
+      "groups": [
+        {
+          "key": 1,
+          "name": "开屏广告-跳过控件",
+          "matchTime": 18000,
+          "actionMaximum": 2,
+          "actionCd": 900,
+          "rules": [
+            {
+              "action": "click",
+              "anyMatches": [
+                "[text*=\"跳过\" || desc*=\"跳过\"][text.length<12][desc.length<12][visibleToUser=true]",
+                "[vid=\"tt_splash_skip_btn\" || vid=\"ksad_splash_skip_left_view\" || vid=\"ksad_splash_skip_right_view\"][visibleToUser=true]"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
