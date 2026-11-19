@@ -50,7 +50,7 @@ Copy-Item "$buildRoot/xguard.apk" "$sourceRoot/app/xguard.apk" -Force
 $badging=& "$tools/aapt.exe" dump badging "$buildRoot/xguard.apk"
 if($LASTEXITCODE -ne 0 -or $badging -notcontains "application-label:'XGuard'"){throw '内置 APK 名称校验失败'}
 if(($badging -join "`n") -notmatch "package: name='com.xuan.xguard'"){throw '内置 APK 包名校验失败'}
-if(($badging -join "`n") -notmatch "versionCode='9002' versionName='0.9.2'"){throw '内置 APK 版本校验失败'}
+if(($badging -join "`n") -notmatch "versionCode='9003' versionName='0.9.3'"){throw '内置 APK 版本校验失败'}
 if((Get-FileHash "$sourceRoot/module/app/xguard.apk").Hash -ne (Get-FileHash "$buildRoot/xguard.apk").Hash){throw '模块内 APK 与新编译结果不一致'}
 if((Get-FileHash "$sourceRoot/app/xguard.apk").Hash -ne (Get-FileHash "$buildRoot/xguard.apk").Hash){throw '开发目录 APK 与新编译结果不一致'}
 Write-Output "构建完成（模块内 APK）：$sourceRoot/module/app/xguard.apk"

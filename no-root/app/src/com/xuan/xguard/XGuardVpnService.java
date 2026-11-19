@@ -39,7 +39,9 @@ public final class XGuardVpnService extends VpnService {
     private static final List<ActivityItem> ACTIVITY = new ArrayList<>();
     private static volatile boolean rulesLoaded;
     private static long queries, blockedQueries, failedQueries, counterStarted;
+    private static final long COUNTER_SAVE_INTERVAL_MS = 30000;
     private long lastCounterSave;
+    private boolean notifiedPaused;
     private static volatile boolean running;
     private static volatile XGuardVpnService instance;
     private ParcelFileDescriptor tunnel;
@@ -49,7 +51,11 @@ public final class XGuardVpnService extends VpnService {
         @Override public void run() {
             if (!getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("enabled",false)) { shutdown(); return; }
             if (!running && (worker==null || !worker.isAlive()) && VpnService.prepare(XGuardVpnService.this)==null) onStartCommand(null,0,0);
-            getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, notification());
+            boolean paused = RecoveryStore.isPaused(XGuardVpnService.this);
+            if (paused != notifiedPaused) {
+                getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, notification(paused));
+                notifiedPaused = paused;
+            }
             healthHandler.postDelayed(this, 60000);
         }
     };
@@ -64,9 +70,10 @@ public final class XGuardVpnService extends VpnService {
         }
         loadRules(this);
         createChannel();
-        if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION_ID, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
-        else if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification(), 0);
-        else startForeground(NOTIFICATION_ID, notification());
+        notifiedPaused = RecoveryStore.isPaused(this);
+        if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION_ID, notification(notifiedPaused), ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+        else if (Build.VERSION.SDK_INT >= 29) startForeground(NOTIFICATION_ID, notification(notifiedPaused), 0);
+        else startForeground(NOTIFICATION_ID, notification(notifiedPaused));
         healthHandler.postDelayed(healthTick, 60000);
     }
 
@@ -203,8 +210,8 @@ public final class XGuardVpnService extends VpnService {
                 if (response != null) {
                     output.write(response);
                     synchronized (XGuardVpnService.class) { queries++; if (blocked) blockedQueries++; if (failed) failedQueries++; }
-                    if (getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("collector", true)) record(query.name, blocked);
-                    if (System.currentTimeMillis() - lastCounterSave > 5000) saveCounters();
+                    if (getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("collector", true)) record(query.name, blocked, failed);
+                    if (android.os.SystemClock.elapsedRealtime() - lastCounterSave >= COUNTER_SAVE_INTERVAL_MS) saveCounters();
                 }
             }
         } catch (Exception ignored) {
@@ -216,7 +223,7 @@ public final class XGuardVpnService extends VpnService {
     private void saveCounters() {
         synchronized (XGuardVpnService.class) {
             getSharedPreferences("xguard_stats", MODE_PRIVATE).edit().putLong("queries", queries).putLong("blocked", blockedQueries).putLong("failed", failedQueries).putLong("started", counterStarted).apply();
-            lastCounterSave = System.currentTimeMillis();
+            lastCounterSave = android.os.SystemClock.elapsedRealtime();
         }
     }
 
@@ -338,20 +345,19 @@ public final class XGuardVpnService extends VpnService {
 
     private static String normalize(String value) { return value == null ? "" : value.trim().toLowerCase(Locale.US).replaceAll("\\.$", ""); }
 
-    private static synchronized void record(String domain, boolean blocked) {
+    private static synchronized void record(String domain, boolean blocked, boolean failed) {
         if (ACTIVITY.size() >= 240) ACTIVITY.remove(0);
-        ACTIVITY.add(new ActivityItem(domain, blocked));
+        ACTIVITY.add(new ActivityItem(domain, blocked, failed));
     }
 
     private void closeTunnel() { if (tunnel != null) { try { tunnel.close(); } catch (Exception ignored) { } tunnel = null; } }
 
     private void createChannel() { if (Build.VERSION.SDK_INT >= 26) { NotificationManager manager = getSystemService(NotificationManager.class); manager.createNotificationChannel(new NotificationChannel(CHANNEL, "XGuard 防护", NotificationManager.IMPORTANCE_LOW)); } }
 
-    private Notification notification() {
+    private Notification notification(boolean paused) {
         Intent intent = new Intent(this, MainActivity.class);
         PendingIntent pending = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder builder = Build.VERSION.SDK_INT >= 26 ? new Notification.Builder(this, CHANNEL) : new Notification.Builder(this);
-        boolean paused=RecoveryStore.isPaused(this);
         return builder.setSmallIcon(android.R.drawable.ic_menu_info_details).setContentTitle(paused?"XGuard 临时暂停拦截":"XGuard 正在保护网络").setContentText(paused?"到期自动恢复 · VPN 继续转发 DNS":"无 Root DNS 广告拦截 · 点击打开控制面板").setContentIntent(pending).setOngoing(true).setCategory(Notification.CATEGORY_SERVICE).build();
     }
 
@@ -366,8 +372,20 @@ public final class XGuardVpnService extends VpnService {
     }
 
     private static final class ActivityItem {
-        final String domain; final boolean blocked; final long time = System.currentTimeMillis();
-        ActivityItem(String domain, boolean blocked) { this.domain = domain; this.blocked = blocked; }
-        JSONObject json() throws Exception { JSONObject result = new JSONObject(); result.put("domain", domain); result.put("source", "dns"); result.put("time", time / 1000L); result.put("rule_blocked", blocked); return result; }
+        final String domain;
+        final boolean blocked;
+        final boolean failed;
+        final long time = System.currentTimeMillis();
+
+        ActivityItem(String domain, boolean blocked, boolean failed) {
+            this.domain = domain;
+            this.blocked = blocked;
+            this.failed = failed;
+        }
+
+        JSONObject json() throws Exception {
+            return new JSONObject().put("domain", domain).put("source", "dns")
+                .put("time", time / 1000L).put("rule_blocked", blocked).put("failed", failed);
+        }
     }
 }

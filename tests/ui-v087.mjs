@@ -45,7 +45,8 @@ for(const vpn of [false,true]) {
   await page.locator('#undo-domain').click(); await page.locator('#confirm-yes').click();
   await page.waitForFunction(()=>!document.querySelector('.app-shell').matches('[aria-busy=true]'));
   assert(await page.locator('#undo-domain').isDisabled());
-  await page.locator('[data-tab=sources]').click();
+  await page.locator('.bottom-nav [data-tab=activity]').click();
+  await page.locator('#activity [data-page=sources]').click();
   assert.match(await page.locator('#rule-diff').textContent(),/新增 10.*移除 3/);
   await page.evaluate(()=>window.failRollback=true);
   await page.locator('#rollback-rules').click(); await page.locator('#confirm-yes').click();

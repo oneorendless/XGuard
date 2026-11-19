@@ -132,7 +132,7 @@ public final class GkdStore {
             connection.setConnectTimeout(12000);
             connection.setReadTimeout(25000);
             connection.setInstanceFollowRedirects(false);
-            connection.setRequestProperty("User-Agent", "XGuard/0.9.2");
+            connection.setRequestProperty("User-Agent", "XGuard/0.9.3");
             try {
                 int status = connection.getResponseCode();
                 if (status >= 300 && status < 400) {

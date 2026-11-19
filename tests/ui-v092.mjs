@@ -36,7 +36,8 @@ try {
     }, vpn);
     await page.goto(pathToFileURL(path.resolve(vpn ? 'no-root/app/assets/index.html' : 'module/webroot/index.html')).href);
     await page.locator('#root-later').click();
-    await page.locator('[data-tab=gkd]').click();
+    await page.locator('.bottom-nav [data-tab=' + (vpn ? 'gkd' : 'splash') + ']').click();
+    if (!vpn) await page.locator('#splash [data-page=gkd]').click();
     const toggle = page.locator('#gkd-hide-recents');
     assert.equal(await toggle.isChecked(), false);
     assert.equal(await toggle.isEnabled(), true);
@@ -49,7 +50,8 @@ try {
     assert.match(await page.locator('#gkd-recents-state').textContent(), /已隐藏/);
     await page.reload();
     await page.locator('#root-later').click();
-    await page.locator('[data-tab=gkd]').click();
+    await page.locator('.bottom-nav [data-tab=' + (vpn ? 'gkd' : 'splash') + ']').click();
+    if (!vpn) await page.locator('#splash [data-page=gkd]').click();
     assert.equal(await toggle.isChecked(), true);
     await page.evaluate(() => { window.failRecents = true; });
     await toggle.click();
@@ -60,7 +62,8 @@ try {
     assert.equal(await toggle.isChecked(), false);
     await page.reload();
     await page.locator('#root-later').click();
-    await page.locator('[data-tab=gkd]').click();
+    await page.locator('.bottom-nav [data-tab=' + (vpn ? 'gkd' : 'splash') + ']').click();
+    if (!vpn) await page.locator('#splash [data-page=gkd]').click();
     assert.equal(await toggle.isChecked(), false);
     for (const theme of ['light', 'dark']) {
       await page.evaluate(value => window.XGuardTheme?.set(value), theme);

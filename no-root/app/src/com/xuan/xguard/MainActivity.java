@@ -316,7 +316,7 @@ public final class MainActivity extends Activity {
             boolean enabled = getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("enabled", false);
             boolean running = XGuardVpnService.isRunning(), paused = RecoveryStore.isPaused(MainActivity.this);
             JSONObject feature = new JSONObject(); feature.put("enabled", enabled); feature.put("conflict", false); feature.put("health", enabled && !running ? "VPN 服务未运行" : "ok"); feature.put("pause_until", paused ? RecoveryStore.pausedUntil(MainActivity.this) : 0); feature.put("summary", !enabled ? "点击开关开启本地 VPN 防护" : !running ? "防护已开启，但 VPN 服务未运行，请检查并修复" : paused ? "临时暂停 DNS 拦截，VPN 继续转发 DNS" : "本地 VPN 正在拦截广告域名");
-            JSONObject result = new JSONObject(); result.put("root", "无 Root · Android VPN"); result.put("daemon", running ? "前台服务运行中" : "未运行"); result.put("safe_mode", false); result.put("version", "v0.9.2-noroot"); result.put("features", new JSONArray().put(feature));
+            JSONObject result = new JSONObject(); result.put("root", "无 Root · Android VPN"); result.put("daemon", running ? "前台服务运行中" : "未运行"); result.put("safe_mode", false); result.put("version", "v0.9.3-noroot"); result.put("features", new JSONArray().put(feature));
             return result.toString();
         }
         private String statsJson(SharedPreferences prefs) throws Exception {
@@ -387,7 +387,7 @@ public final class MainActivity extends Activity {
             for (String address : spec.urls) {
                 HttpURLConnection connection = null;
                 try {
-                    connection = (HttpURLConnection) new URL(address).openConnection(); connection.setConnectTimeout(10000); connection.setReadTimeout(30000); connection.setInstanceFollowRedirects(true); connection.setRequestProperty("User-Agent", "XGuard/0.9.2");
+                    connection = (HttpURLConnection) new URL(address).openConnection(); connection.setConnectTimeout(10000); connection.setReadTimeout(30000); connection.setInstanceFollowRedirects(true); connection.setRequestProperty("User-Agent", "XGuard/0.9.3");
                     if (connection.getResponseCode() / 100 != 2) continue;
                     try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8)); BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(new FileOutputStream(temp), StandardCharsets.UTF_8))) {
                         String line; long bytes = 0; while ((line = reader.readLine()) != null) { bytes += line.length() + 1; if (bytes > 20L * 1024L * 1024L) throw new IOException("订阅过大"); writer.write(line); writer.newLine(); }

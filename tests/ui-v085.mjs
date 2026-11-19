@@ -25,10 +25,10 @@ for (const vpn of [false, true]) {
       if (args[0] === 'apps') result = {apps:[{pkg:'com.xunlei.downloadprovider',name:'迅雷',icon:'logo.svg'}]};
       if (action === 'stats') result = {mode:vpn?'dns-vpn':'hosts',splash_locked_apps:1, hosts_rules:10000,sources:5};
       if (action === 'sources') { if (op === 'interval' && !window.failInterval) sourceInterval = Number(args[4]); result = {list:[],interval_h:sourceInterval}; }
-      if (args[0] === 'log') result = args[1] ? '防护日志测试' : '核心日志测试';
+      if (args[0] === 'log') result = args[1] ? '防护日志测试' : '11-19 09:00:00 [shield] 核心日志测试';
       if (action === 'activity') {
         if (op === 'clear') activityCleared = true;
-        result = {collector:{running:true,enabled:true},snapshot:{observed:100,matched:25,updated:Date.now()/1000,items:activityCleared?[]:[{domain:'ads.example.com',source:'dns',rule_blocked:true,time:Date.now()/1000},{domain:'ads.example.com',source:'dns',rule_blocked:true,time:Date.now()/1000-60},{domain:'example.com',source:'dns',rule_blocked:false,time:Date.now()/1000}],totals:{queries:100,blocked:25,failed:2,started:Date.now()/1000}}};
+        result = {collector:{running:true,enabled:true},snapshot:{observed:100,matched:25,updated:Date.now()/1000,items:activityCleared?[]:[{domain:'ads.example.com',source:'dns',rule_blocked:true,time:Date.now()/1000},{domain:'ads.example.com',source:'dns',rule_blocked:true,time:Date.now()/1000-60},{domain:'example.com',source:'dns',rule_blocked:false,failed:true,time:Date.now()/1000}],totals:{queries:100,blocked:25,failed:2,started:Date.now()/1000}}};
         if (window.emptyStats) { result.snapshot.observed = result.snapshot.matched = 0; result.snapshot.totals.queries = result.snapshot.totals.blocked = 0; }
       }
       if (action === 'hits') result = {rules:op?rules.filter(rule=>rule.pkg===op):rules};
@@ -59,7 +59,8 @@ for (const vpn of [false, true]) {
   assert(await page.evaluate(()=>window.calls.some(args=>args[2]==='stats' && args[3]==='quick')));
   assert.equal(await page.locator('#locked-count').textContent(), vpn?'需 Root':'1');
   await page.screenshot({path:path.join(output,vpn?'vpn-home-dark.png':'root-home-dark.png'),fullPage:true});
-  await page.locator('[data-tab=splash]').click();
+  await page.locator('.bottom-nav [data-tab=' + (vpn ? 'gkd' : 'splash') + ']').click();
+  if (vpn) await page.locator('#gkd [data-page=splash]').click();
   if (vpn) {
     await page.locator('#splash-hits').getByText(/Android 不允许/).waitFor();
     assert(await page.locator('#add-rule').isDisabled());
@@ -98,7 +99,8 @@ for (const vpn of [false, true]) {
     await page.locator('#candidates .row').filter({hasText:'cache/other_adcache'}).waitFor({state:'hidden'});
     await page.screenshot({path:path.join(output,'root-groups-dark.png'),fullPage:true});
   }
-  await page.locator('[data-tab=sources]').click();
+  await page.locator('.bottom-nav [data-tab=activity]').click();
+  await page.locator('#activity [data-page=sources]').click();
   await page.locator('#interval-open').getByText('每 72 小时',{exact:true}).waitFor();
   await page.locator('#interval-open').click();
   assert.equal(await page.locator('[data-interval="72"]').getAttribute('aria-pressed'),'true');
@@ -111,7 +113,7 @@ for (const vpn of [false, true]) {
   await page.waitForTimeout(350);
   await page.screenshot({path:path.join(output,vpn?'vpn-interval-dark.png':'root-interval-dark.png')});
   await page.locator('#interval-save').click();
-  await page.waitForFunction(()=>document.querySelector('.app-shell').getAttribute('aria-busy')==='false');
+  await page.locator('#interval-dialog').waitFor({state:'hidden'});
   assert.equal(await page.locator('#interval').inputValue(),'12');
   assert(await page.evaluate(()=>window.calls.some(args=>args[2]==='sources' && args[3]==='interval' && args[4]==='12')));
   await page.evaluate(()=>window.failInterval=true);
@@ -125,23 +127,29 @@ for (const vpn of [false, true]) {
   await page.locator('[data-tab=settings]').click();
   await page.evaluate(()=>window.failLog=true);
   await page.locator('#logs').click();
-  await page.waitForFunction(()=>document.querySelector('.app-shell').getAttribute('aria-busy')==='true');
   await page.locator('#logs-dialog').waitFor();
-  await page.locator('#logs-state').getByText(/读取完成/).waitFor();
-  assert.match(await page.locator('#log-output').textContent(),/核心日志测试/);
-  assert.match(await page.locator('#log-output').textContent(),/读取失败/);
+  await page.locator('#logs-state').getByText(/最近/).waitFor();
+  assert(await page.locator('#log-details summary').isVisible());
+  assert(await page.locator('#log-output').isHidden());
+  if (vpn) {
+    assert.match(await page.locator('#log-events').textContent(), /DNS 查询失败/);
+  } else {
+    assert.match(await page.locator('#log-output').textContent(), /核心日志测试/);
+    assert.match(await page.locator('#log-events').textContent(), /防护日志暂时读取失败/);
+  }
+  await page.locator('#log-filter').selectOption('attention');
+  assert.equal(await page.locator('#log-events li').count(), 1);
   await page.screenshot({path:path.join(output,vpn?'vpn-logs-dark.png':'root-logs-dark.png')});
   await page.locator('#logs-dialog').getByRole('button',{name:'关闭日志',exact:true}).click();
   assert(await page.locator('#logs-dialog').isHidden());
   await page.locator('#logs').click();
   await page.evaluate(()=>window.xguardBack());
   assert(await page.locator('#logs-dialog').isHidden());
-  await page.waitForFunction(()=>document.querySelector('.app-shell').getAttribute('aria-busy')==='false');
   await page.locator('#display-theme').selectOption('light');
   assert.equal(await page.locator('body').evaluate(el=>getComputedStyle(el).backgroundColor),'rgb(245, 245, 245)');
   await page.reload(); await page.locator('[data-tab=settings]').click();
   await page.locator('#logs').click();
-  await page.locator('#logs-state').getByText(/读取完成/).waitFor();
+  await page.locator('#logs-state').getByText(/最近/).waitFor();
   await page.locator('#logs-dialog').getByRole('button',{name:'完成',exact:true}).click();
   await page.waitForFunction(()=>document.getElementById('rule-count').textContent==='10,000');
   assert.equal(await page.locator('#display-theme').inputValue(),'light');
@@ -165,11 +173,10 @@ for (const vpn of [false, true]) {
   await page.screenshot({path:path.join(output,vpn?'vpn-home-small.png':'root-home-small.png'),fullPage:true});
   await page.locator('[data-tab=activity]').click();
   await page.locator('.activity-row').filter({hasText:'ads.example.com'}).getByRole('button',{name:'放行',exact:true}).click();
-  await page.waitForFunction(()=>document.querySelector('.app-shell').getAttribute('aria-busy')==='false');
-  assert.equal(await page.locator('#traffic-top .row').count(),vpn?1:0);
+  await page.waitForFunction(vpn => document.querySelectorAll('#traffic-top .row').length === (vpn ? 1 : 0), vpn);
   await page.locator('#activity-clear').click();
   await page.locator('#confirm-yes').click();
-  await page.waitForFunction(()=>document.querySelector('.app-shell').getAttribute('aria-busy')==='false');
+  await page.waitForFunction(() => document.querySelector('#activity-list .empty') !== null);
   await page.locator('[data-tab=home]').click();
   assert.equal(await page.locator('#traffic-total').textContent(),'100');
   assert.equal(await page.locator('#traffic-blocked').textContent(),'25');

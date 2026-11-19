@@ -62,6 +62,7 @@
   const nav=document.querySelector('.bottom-nav');
   function syncNavigation(){
     const tabs=[...nav.querySelectorAll('button')];
+    nav.style.setProperty('--tab-count', String(tabs.length));
     nav.style.setProperty('--tab-index',String(Math.max(0,tabs.findIndex(t=>t.getAttribute('aria-selected')==='true'))));
   }
   new MutationObserver(syncNavigation).observe(nav,{subtree:true,attributes:true,attributeFilter:['aria-selected']});

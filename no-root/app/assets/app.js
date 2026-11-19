@@ -9,6 +9,33 @@ let recovery = null;
 let recoveryLoading = null;
 let recoveryExpiryChecked = 0;
 let activeTab = 'home';
+let pauseTimer;
+const sectionPages = [
+  [['activity', '域名记录'], ['sources', '规则订阅']],
+  [['gkd', '自动跳过 · GKD'], ['splash', '缓存锁定 · 需 Root']]
+];
+function installSectionNavigation() {
+  for (const pages of sectionPages) {
+    for (const [page] of pages) {
+      const group = document.createElement('nav');
+      group.className = 'section-nav';
+      group.setAttribute('aria-label', pages[0][0] === 'activity' ? '域名工具' : '开屏工具');
+      for (const [id, label] of pages) {
+        const control = document.createElement('button');
+        control.type = 'button';
+        control.dataset.page = id;
+        control.setAttribute('aria-pressed', String(id === page));
+        control.textContent = label;
+        control.onclick = () => {
+          switchPage(id);
+          element(id).querySelector('.section-nav [aria-pressed="true"]').focus({preventScroll:true});
+        };
+        group.append(control);
+      }
+      element(page).querySelector('.page-heading').before(group);
+    }
+  }
+}
 let hitRules = [];
 let userRules = [];
 let candidates = [];
@@ -20,8 +47,6 @@ function installGkdPage() {
     const page = document.createElement('section'); page.id = 'gkd'; page.className = 'page'; page.hidden = true;
     page.innerHTML = '<div class="page-heading"><p class="eyebrow">GKD UI RULES</p><h1>自动跳过，按订阅选择。</h1><p class="muted">规则来源逐项启停，也可以下载自己的 HTTPS GKD 订阅。</p></div><article class="notice featured-support"><label class="row" for="gkd-hide-recents"><span><b>隐藏最近任务</b><small id="gkd-recents-state">从系统最近任务列表中隐藏 XGuard</small></span><input id="gkd-hide-recents" type="checkbox" role="switch"></label></article><article class="notice"><b>权限状态</b><p id="gkd-state" class="muted micro"></p><div class="row"><span><b>本地 VPN</b><small id="permission-root-state"></small></span></div><div class="row"><span><b>无障碍服务</b><small id="permission-accessibility-state"></small></span><button id="permission-accessibility" class="secondary">授权无障碍</button></div><label class="row" for="gkd-accessibility-guard"><span><b>无障碍守护</b><small>每 2 分钟检查一次，掉线后尝试恢复 XGuard 服务</small></span><input id="gkd-accessibility-guard" type="checkbox" role="switch"></label><button id="gkd-authorize" class="secondary full">打开首次权限向导</button></article><article class="card list" id="gkd-source-list"></article><article class="card"><label for="gkd-source-url">在线 GKD 订阅地址</label><input id="gkd-source-url" type="url" placeholder="https://example.com/gkd.json5" autocapitalize="off" spellcheck="false"><button id="gkd-source-add" class="primary full">下载并添加订阅</button><button id="gkd-update" class="secondary full">更新已勾选订阅</button><p id="gkd-download-state" class="muted micro" role="status"></p><p class="muted micro">只导入可安全解析的开屏规则；复杂关系、前置条件和不支持属性会整条跳过。</p></article><p id="gkd-last-action" class="muted micro"></p>';
     document.querySelector('main').insertBefore(page, document.querySelector('#settings'));
-    const nav = document.querySelector('.bottom-nav'); const settings = nav.querySelector('[data-tab=settings]');
-    const button = document.createElement('button'); button.dataset.tab = 'gkd'; button.setAttribute('aria-selected', 'false'); button.innerHTML = '<svg><use href="#i-rules"/></svg><span>GKD</span>'; nav.insertBefore(button, settings);
   }
   element('gkd-source-add').onclick = () => gkdTask(async () => {
     const address = element('gkd-source-url').value.trim();
@@ -248,6 +273,8 @@ async function refresh() {
   } else { element('update-info').textContent = '规则状态读取失败：' + result.error.message; }
   renderTrafficStats();
   tabLoadedAt.clear();
+  syncActivityTimer();
+  syncPauseTimer();
   await loadTab(true);
 }
 function loadTab(force = false) {
@@ -369,9 +396,13 @@ async function changeDomain(kind, domain) {
 function switchPage(id) {
   if (activeTab === id) return;
   activeTab = id; document.querySelectorAll('.page').forEach(page => { page.hidden = page.id !== id; });
-  document.querySelectorAll('nav button').forEach(tab => tab.setAttribute('aria-selected', String(tab.dataset.tab === id)));
-  clearInterval(activityTimer); activityTimer = null; window.scrollTo(0, 0);
-  if (id === 'activity') activityTimer = setInterval(() => { if (!document.hidden && !pending) loadActivity(); }, 5000);
+  const primary = sectionPages.find(pages => pages.some(([page]) => page === id))?.[0][0] || id;
+  document.querySelectorAll('.bottom-nav [data-tab]').forEach(tab => {
+    tab.setAttribute('aria-selected', String(tab.dataset.tab === primary));
+  });
+  window.scrollTo(0, 0);
+  syncActivityTimer();
+  syncPauseTimer();
   if (id === 'activity' && activityPayload) renderActivity();
   if (id === 'home') void loadActivity();
   // Navigation never waits for su / network / list loading. Each tab deduplicates
@@ -475,7 +506,8 @@ function renderHits() {
 async function addRule(pkg, path) { requireEnabled(); if (isVpnMode()) throw new Error('缓存锁定需要 Root'); if (!/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$/.test(pkg) || !path) throw new Error('请填写有效包名与路径'); toast('正在保存此应用的规则…'); await run('rules', 'add', pkg, path); await reloadSplashApp(pkg); const saved = hitRules.find(rule => rule.pkg === pkg && rule.path === path); toast(saved?.state === 'locked' ? '规则已保存，目录已锁定' : saved?.state === 'weak' ? '规则已保存，文件系统仅支持弱占位' : '规则已保存，应用未安装或目录暂不可锁定'); }
 
 installGkdPage();
-document.querySelectorAll('nav button').forEach(control => { control.onclick = () => switchPage(control.dataset.tab); });
+installSectionNavigation();
+document.querySelectorAll('.bottom-nav [data-tab]').forEach(control => { control.onclick = () => switchPage(control.dataset.tab); });
 element('refresh').onclick = () => { if (!rootReady && window.XGuard) element('root-dialog').showModal(); else task(refresh, element('refresh')); };
 element('toggle').onclick = () => task(async () => { if (status.safe_mode) throw new Error('请先关闭安全模式并重启'); if (noRoot && window.XGuard.isVpnPrepared && !window.XGuard.isVpnPrepared()) await requestVpnAccess(); await exec([status.features[0].enabled ? 'disable' : 'enable', 'shield']); await refresh(); }, element('toggle'));
 element('update').onclick = () => task(async () => {
@@ -553,17 +585,7 @@ element('guard').onchange = () => task(async () => { requireEnabled(); if (eleme
 for (const [id, key] of [['proxy-yield', 'proxy_yield'], ['hide', 'hide']]) element(id).onchange = () => task(async () => { requireEnabled(); await run('set', key, element(id).checked ? '1' : '0'); toast(key === 'hide' ? '已保存，重启后完全生效' : '已保存'); await refresh(); });
 element('mount-mode').onchange = () => task(async () => { requireEnabled(); await run('set', 'mount_mode', element('mount-mode').value); await refresh(); });
 element('save-max').onclick = () => task(async () => { requireEnabled(); await run('set', 'hosts_max', element('max-rules').value); toast('规则上限已保存'); await refresh(); });
-element('logs').onclick = () => task(async () => {
-  const dialog = element('logs-dialog'), output = element('log-output');
-  output.hidden = true; output.textContent = ''; element('logs-state').textContent = '正在读取日志…'; dialog.showModal();
-  const sections = ['', '', ''];
-  await Promise.all([['核心日志', () => exec(['log'])], ['防护日志', () => exec(['log', 'shield'])], ['运行状态', () => run('stats', 'quick')]].map(async ([title, read], index) => {
-    try { const text = await read(); sections[index] = '【' + title + '】\n' + (text.trim() || '暂无日志'); }
-    catch (error) { sections[index] = '【' + title + '】读取失败：' + error.message; }
-    output.textContent = sections.filter(Boolean).join('\n\n'); output.hidden = false;
-  }));
-  element('logs-state').textContent = '读取完成，可关闭窗口返回设置。';
-}, element('logs'));
+element('logs').onclick = () => window.XGuardLogs.open({vpn: isVpnMode(), exec, run, status});
 element('safe-mode').onclick = () => task(async () => { const enabled = !status.safe_mode; if (await confirmAction(enabled ? '开启安全模式' : '关闭安全模式', '重启手机后生效。')) { await exec(['safe', enabled ? 'on' : 'off']); toast('已保存，请重启手机'); await refresh(); } });
 const healthLabels={ok:'运行正常',off:'防护已关闭',paused:'防护临时暂停',no_rules:'缺少可用规则',not_mounted:'HOSTS 未挂载',daemon_stopped:'守护进程未运行',collector_stopped:'采集器未运行',vpn_stopped:'VPN 服务未运行',permission_required:'需要 VPN 授权'};
 async function loadRecovery(fresh=false) {
@@ -583,6 +605,7 @@ function renderPause() {
 }
 function renderRecovery() {
   renderPause();
+  syncPauseTimer();
   element('undo-domain').disabled=!recovery?.undo_available;
   element('rollback-rules').disabled=!recovery?.backup_time;
   element('rule-diff').textContent=recovery?.update_time?'最近更新 '+age(recovery.update_time)+' · 新增 '+number(recovery.update_added)+' · 移除 '+number(recovery.update_removed)+' 个规则域名':'尚无本次更新记录';
@@ -615,14 +638,33 @@ async function checkHealth(repair=false) {
 }
 element('health-check').onclick=()=>task(()=>checkHealth(),element('health-check'));
 element('health-repair').onclick=()=>task(()=>checkHealth(true),element('health-repair'));
-setInterval(()=>{renderPause(); if(status && !pending && !document.hidden && Date.now()-recoveryExpiryChecked>15000 && Number(recovery?.pause_until)>0 && Number(recovery.pause_until)<=Date.now()/1000) { recoveryExpiryChecked=Date.now(); void loadRecovery().then(()=>refresh()); }},1000);
+function syncPauseTimer() {
+  clearTimeout(pauseTimer);
+  const until = Number(recovery?.pause_until ?? status?.features?.[0]?.pause_until ?? 0);
+  if (document.hidden || activeTab !== 'home' || until <= 0) return;
+  renderPause();
+  if (until > Date.now() / 1000) {
+    pauseTimer = setTimeout(syncPauseTimer, 1000);
+    return;
+  }
+  const delay = pending ? 1000 : Math.max(0, 15000 - (Date.now() - recoveryExpiryChecked));
+  pauseTimer = setTimeout(async () => {
+    if (pending) { syncPauseTimer(); return; }
+    recoveryExpiryChecked = Date.now();
+    try { await refresh(); } catch {} finally { syncPauseTimer(); }
+  }, delay);
+}
 element('activity-open').onclick = () => switchPage('activity');
 element('activity-refresh').onclick = () => task(loadActivity, element('activity-refresh'));
 element('activity-clear').onclick = () => task(async () => { if (await confirmAction('清空域名记录', '清空最近观察到的域名，防护规则会保留。')) { activityPayload = await json(run('activity', 'clear')); renderActivity(true); renderTrafficStats(); } }, element('activity-clear'));
 element('monitor-toggle').onclick = () => task(async () => { activityPayload = await json(run('activity', activityPayload?.collector?.enabled === false ? 'enable' : 'disable')); renderActivity(true); renderTrafficStats(); }, element('monitor-toggle'));
 element('activity-search').oninput = () => renderActivity(true);
 document.querySelectorAll('[data-filter]').forEach(control => { control.onclick = () => { activityFilter = control.dataset.filter; document.querySelectorAll('[data-filter]').forEach(button => button.setAttribute('aria-selected', String(button === control))); renderActivity(true); }; });
-document.addEventListener('visibilitychange', () => { if (!document.hidden && activeTab === 'activity' && !pending) loadActivity(); });
+document.addEventListener('visibilitychange', () => {
+  syncActivityTimer();
+  syncPauseTimer();
+  if (!document.hidden && !pending && rootReady && ['home', 'activity'].includes(activeTab)) void loadActivity();
+});
 element('show-license').onclick = () => element('license-dialog').showModal();
 element('show-gpl-license').onclick = async () => {
   try {
@@ -652,11 +694,22 @@ if (noRoot) {
   element('runtime').parentElement.querySelector('p:last-child').textContent = '使用 Android 本地 VPN 服务；缓存锁定需要 Root。';
   element('traffic-title').textContent = '拦截统计';
 }
-setInterval(() => { if (activeTab === 'home' && !document.hidden && !pending && status && rootReady) void loadActivity(); }, 10000);
+function syncActivityTimer() {
+  clearTimeout(activityTimer);
+  activityTimer = null;
+  if (document.hidden || !rootReady || !status || !['home', 'activity'].includes(activeTab)) return;
+  const collecting = activityPayload?.collector?.running && activityPayload?.collector?.enabled !== false;
+  const delay = activeTab === 'activity' && collecting ? 8000 : 20000;
+  activityTimer = setTimeout(async () => {
+    if (!pending) await loadActivity();
+    syncActivityTimer();
+  }, delay);
+}
 window.xguardBack = () => {
   const dialog = document.querySelector('dialog[open]');
   if (dialog) { dialog.dispatchEvent(new Event('cancel')); dialog.close(); return true; }
-  if (activeTab !== 'home') { switchPage('home'); return true; }
+  const parent = sectionPages.find(pages => pages[1][0] === activeTab)?.[0][0];
+  if (activeTab !== 'home') { switchPage(parent || 'home'); return true; }
   return false;
 };
 element('root-later').onclick = () => {

@@ -54,7 +54,7 @@ try {
     }, vpn);
     await page.goto(pathToFileURL(path.resolve(vpn ? 'no-root/app/assets/index.html' : 'module/webroot/index.html')).href);
     assert(await page.locator('#root-dialog').evaluate(dialog => dialog.open));
-    assert.equal(await page.locator('.bottom-nav button').count(), 6);
+    assert.deepEqual(await page.locator('.bottom-nav button span').allTextContents(), ['概览','域名','开屏','设置']);
     await page.locator('#root-authorize').click();
     await page.waitForFunction(() => !document.getElementById('root-authorize').disabled);
     assert(await page.locator('#root-dialog').evaluate(dialog => dialog.open));
@@ -66,13 +66,15 @@ try {
     await page.locator('#root-authorize').click();
     await page.waitForFunction(() => !document.getElementById('root-dialog').open);
     assert.equal(await page.evaluate(() => localStorage.getItem('xguard.permissions.v091')), '1');
-    await page.locator('[data-tab=gkd]').click();
+    await page.locator('.bottom-nav [data-tab=' + (vpn ? 'gkd' : 'splash') + ']').click();
+    if (!vpn) await page.locator('#splash [data-page=gkd]').click();
     await page.locator('#gkd-source-list input').first().waitFor();
     assert.equal(await page.locator('#gkd-hide-recents').isChecked(), false);
     await page.locator('#gkd-hide-recents').check();
     assert.equal(await page.locator('#gkd-hide-recents').isChecked(), true);
     assert(await page.evaluate(() => window.calls.some(args => args.join('|') === 'hide-from-recents|true')));
-    assert(await page.locator('#settings #gkd').count() === 0);
+    assert(await page.locator('#gkd').isVisible());
+    assert.equal(await page.locator('.bottom-nav button[aria-selected=true] span').textContent(), '开屏');
     const duration = await page.locator('.nav-lens').evaluate(lens => getComputedStyle(lens).transitionDuration);
     assert.equal(duration, '0.55s');
     assert(await page.locator('#gkd-source-list input').first().isChecked());
@@ -106,5 +108,5 @@ try {
     assert.deepEqual(errors, []);
     await page.close();
   }
-  console.log('PASS: first-open Root/VPN and accessibility guide, six tabs, slow lens animation, independent/all-off subscriptions, native download/delete commands, guard switch and GPL entry, 320px layout');
+  console.log('PASS: first-open Root/VPN and accessibility guide, four tabs, slow lens animation, independent/all-off subscriptions, native download/delete commands, guard switch and GPL entry, 320px layout');
 } finally { await browser.close(); }
