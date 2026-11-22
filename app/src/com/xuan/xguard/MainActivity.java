@@ -19,7 +19,10 @@ import android.webkit.WebViewClient;
 import android.webkit.WebResourceRequest;
 import android.view.accessibility.AccessibilityManager;
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import org.json.JSONArray;
@@ -162,6 +165,37 @@ public final class MainActivity extends Activity {
             });
         }
 
+        private void syncRootAllowlist(Set<String> packages) throws Exception {
+            StringBuilder command = new StringBuilder("sh /data/adb/modules/xguard/system/bin/xguard run shield app_allowlist");
+            for (String pkg : new TreeSet<>(packages)) {
+                if (!AppCatalog.isPackageName(pkg)) throw new IOException("无效包名");
+                command.append(' ').append(pkg);
+            }
+            Process process = new ProcessBuilder("su", "-M", "-c", command.toString()).redirectErrorStream(true).start();
+            StringBuilder output = new StringBuilder();
+            try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                String line;
+                while ((line = reader.readLine()) != null) output.append(line).append('\n');
+            }
+            if (process.waitFor() != 0) throw new IOException("无法同步模块白名单，请检查 Root 授权与模块版本\n" + output);
+            getSharedPreferences("xguard", MODE_PRIVATE).edit().putBoolean("root_allowlist_synced", true).apply();
+        }
+
+        private String handleGkd(JSONArray values) throws Exception {
+            synchronized (GkdStore.class) {
+                if ("allowlist".equals(values.optString(1)) && values.length() == 2) migrateRootAllowlist();
+                return GkdStore.handle(MainActivity.this, values, this::syncRootAllowlist);
+            }
+        }
+
+        private void migrateRootAllowlist() throws Exception {
+            synchronized (GkdStore.class) {
+                if (getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("root_allowlist_synced", false)) return;
+                Set<String> selected = GkdStore.allowlist(MainActivity.this);
+                if (!selected.isEmpty()) syncRootAllowlist(selected);
+            }
+        }
+
         @JavascriptInterface public void execute(final String arguments, final String callback) {
             if (callback == null || !callback.matches("xguardCallback[0-9]+")) return;
             executor.execute(() -> {
@@ -170,7 +204,7 @@ public final class MainActivity extends Activity {
                 try {
                     JSONArray values = new JSONArray(arguments);
                     if (values.length() > 0 && "gkd".equals(values.getString(0))) {
-                        deliver(callback, 0, GkdStore.handle(MainActivity.this, values));
+                        deliver(callback, 0, handleGkd(values));
                         return;
                     }
                     if (values.length() > 0 && "apps".equals(values.getString(0))) {
@@ -190,6 +224,10 @@ public final class MainActivity extends Activity {
                     while ((line = reader.readLine()) != null) text.append(line).append('\n');
                     errno = process.waitFor();
                     output = text.toString();
+                    if (errno == 0 && "status".equals(values.optString(0))) {
+                        try { migrateRootAllowlist(); }
+                        catch (Exception error) { android.util.Log.w("XGuard", "Could not migrate application allowlist", error); }
+                    }
                 } catch (Exception error) {
                     errno = 1;
                     output = error.toString();

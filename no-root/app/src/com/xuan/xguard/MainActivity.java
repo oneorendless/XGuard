@@ -283,7 +283,7 @@ public final class MainActivity extends Activity {
         private String dispatch(JSONArray values) throws Exception {
             if (values.length() == 0) throw new IllegalArgumentException("缺少操作");
             String command = values.getString(0);
-            if ("gkd".equals(command)) return GkdStore.handle(MainActivity.this, values);
+            if ("gkd".equals(command)) return GkdStore.handle(MainActivity.this, values, XGuardVpnService::applyAllowlist);
             if ("apps".equals(command)) return AppCatalog.describe(MainActivity.this, values);
             if ("status".equals(command)) return statusJson();
             if ("log".equals(command)) {

@@ -32,12 +32,12 @@ try {
     await page.goto(pathToFileURL(path.resolve(vpn ? 'no-root/app/assets/index.html' : 'module/webroot/index.html')).href);
     const open = async () => {
       await page.locator('#root-later').click();
-      await page.locator('.bottom-nav [data-tab=' + (vpn ? 'gkd' : 'splash') + ']').click();
-      if (!vpn) await page.locator('#splash [data-page=gkd]').click();
+      await page.locator('.bottom-nav [data-tab=settings]').click();
       await page.getByText('应用白名单', {exact:true}).click();
       await page.locator('#gkd-app-list label').last().waitFor();
     };
     await open();
+    assert.match(await page.locator('#gkd-app-allowlist p').first().textContent(), vpn ? /绕过 XGuard 的 DNS 拦截/ : /系统 hosts 由应用共享/);
     await page.locator('#gkd-app-search').fill('com.xiaomi.shop');
     const toggle = page.locator('#gkd-app-list input');
     assert.equal(await toggle.count(), 1);

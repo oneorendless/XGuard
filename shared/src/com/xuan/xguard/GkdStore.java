@@ -7,6 +7,7 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -33,7 +34,13 @@ public final class GkdStore {
 
     private GkdStore() { }
 
-    public static synchronized String handle(Context context, JSONArray args) throws Exception {
+    interface AllowlistApplier { void apply(Set<String> packages) throws Exception; }
+
+    public static String handle(Context context, JSONArray args) throws Exception {
+        return handle(context, args, null);
+    }
+
+    static synchronized String handle(Context context, JSONArray args, AllowlistApplier applier) throws Exception {
         String operation = args.optString(1);
         SharedPreferences prefs = prefs(context);
         if ("license".equals(operation)) { try (InputStream input = context.getAssets().open("GPL-3.0.txt")) { return read(input); } }
@@ -51,7 +58,15 @@ public final class GkdStore {
                     || !("1".equals(value) || "0".equals(value))) throw new IllegalArgumentException("无效的应用白名单设置");
                 selected = new HashSet<>(selected);
                 if ("1".equals(value)) selected.add(pkg); else selected.remove(pkg);
-                prefs.edit().putStringSet("gkd_allowlist", selected).apply();
+                Set<String> previous = allowlist(context);
+                try {
+                    if (!prefs.edit().putStringSet("gkd_allowlist", selected).commit())
+                        throw new IOException("无法保存应用白名单");
+                    if (applier != null) applier.apply(selected);
+                } catch (Exception error) {
+                    prefs.edit().putStringSet("gkd_allowlist", previous).commit();
+                    throw error;
+                }
                 return new JSONObject().put("count", selected.size()).toString();
             }
             return new JSONObject().put("apps", AppCatalog.selectable(context, selected)).toString();
@@ -104,7 +119,7 @@ public final class GkdStore {
         throw new IllegalArgumentException("未知 GKD 操作");
     }
 
-    private static Set<String> allowlist(Context context) {
+    static Set<String> allowlist(Context context) {
         return prefs(context).getStringSet("gkd_allowlist", Collections.emptySet());
     }
 

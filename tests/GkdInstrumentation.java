@@ -56,6 +56,14 @@ public final class GkdInstrumentation extends Instrumentation {
             check(new JSONObject(command("gkd", "allowlist")).getJSONArray("apps").toString().contains(protectedApp), "selected package remains listed when uninstalled");
             command("gkd", "allowlist", protectedApp, "0");
             check(!GkdStore.isAllowlisted(getTargetContext(), protectedApp), "allowlist remove visible to service");
+            boolean applyFailed = false;
+            try {
+                GkdStore.handle(getTargetContext(), new JSONArray().put("gkd").put("allowlist").put(protectedApp).put("1"), packages -> {
+                    check(packages.contains(protectedApp), "network applier received full selection");
+                    throw new java.io.IOException("simulated error applying network settings");
+                });
+            } catch (java.io.IOException expected) { applyFailed = true; }
+            check(applyFailed && !GkdStore.isAllowlisted(getTargetContext(), protectedApp), "failure rolls back saved application exemption");
             command("gkd", "toggle", "lin-arm", "1");
             JSONObject sources = new JSONObject(command("gkd", "sources"));
             JSONObject remote = sources.getJSONArray("list").getJSONObject(2);

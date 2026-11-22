@@ -22,6 +22,7 @@ ALLOW=$AD_DIR/allow                  # 放行域名：一行一个，*.example.c
 BLOCK=$AD_DIR/block                  # 自定义拦截域名：一行一个
 USER_RULES=$AD_DIR/splash.rules
 SKIP=$AD_DIR/skip                    # 用户单独解锁的 App：splash_apply 永久跳过
+APP_ALLOW=$AD_DIR/app-allowlist
 META=$AD_DIR/hosts.meta              # 更新记录：last_try / last_ok / result / rules / sources_ok / capped
 TEST_JSON=$AD_DIR/test.json          # 最近一次自检结果（xguard run shield test）
 ACTIVITY=$AD_DIR/activity.log        # 最近域名活动（时间\t域名\t动作\t来源）
@@ -654,15 +655,34 @@ GUARD_CHAIN=XGUARD_HTTPDNS
 # v0.2.26 改回默认关（v0.2.24 默认开导致支付宝/余额宝白屏、123云盘转圈等）：国内 App / 广告 SDK 大量用阿里、腾讯、百度的 HTTPDNS 纯 IP 接口解析，完全不经过 hosts；
 # 拒掉这些 IP 后 SDK 按设计退回系统 DNS，才会命中 hosts（Re-Malwack / 「去广告模块」lingeringsound 同样用 iptables 补这一块）
 guard_wanted() { [ "$(core_cfg_get $SHIELD guard 0)" = 1 ]; }
-guard_on() {
+allowlisted_uids() {
+  [ -s "$APP_ALLOW" ] || return 0
+  while IFS= read -r allowed_pkg; do
+    valid_pkg "$allowed_pkg" || continue
+    for app_dir in /data/user/[0-9]*/"$allowed_pkg" /data/user_de/[0-9]*/"$allowed_pkg"; do
+      stat -c %u "$app_dir" 2>/dev/null || :
+    done
+  done <"$APP_ALLOW" | awk '/^[0-9]+$/ && $1 % 100000 >= 10000' | sort -u
+}
+guard_signature() {
+  { printf '%s\n' "$1"; cksum "$XG_FDIR/rules/httpdns.ip"; } | cksum | awk '{print $1}'
+}
+guard_on() (
+  feat_enabled "$SHIELD" && ! shield_paused && ! proxy_running || return 0
   command -v iptables >/dev/null 2>&1 || return 1
-  iptables -w -N $GUARD_CHAIN 2>/dev/null; iptables -w -F $GUARD_CHAIN
+  guard_uids=$(allowlisted_uids)
+  iptables -w -N "$GUARD_CHAIN" 2>/dev/null || :
+  iptables -w -F "$GUARD_CHAIN" || return 1
+  for guard_uid in $guard_uids; do
+    iptables -w -A "$GUARD_CHAIN" -m owner --uid-owner "$guard_uid" -j RETURN 2>/dev/null || return 1
+  done
   grep -vE '^[[:space:]]*(#|$)' "$XG_FDIR/rules/httpdns.ip" | while read -r ip; do
     iptables -w -A $GUARD_CHAIN -d "$ip" -p tcp -m multiport --dports 80,443 -j REJECT --reject-with tcp-reset 2>/dev/null ||
-      iptables -w -A $GUARD_CHAIN -d "$ip" -p tcp --dport 443 -j REJECT 2>/dev/null
-  done
+      iptables -w -A $GUARD_CHAIN -d "$ip" -p tcp --dport 443 -j REJECT 2>/dev/null || exit 1
+  done || return 1
+  iptables -w -A "$GUARD_CHAIN" -m comment --comment "xguard-$(guard_signature "$guard_uids")" -j RETURN || return 1
   iptables -w -C OUTPUT -j $GUARD_CHAIN 2>/dev/null || iptables -w -I OUTPUT -j $GUARD_CHAIN
-}
+)
 guard_off() {
   # 撤干净：IPv4 / IPv6 两张表都查（AdAway / Re-Malwack 撤规则同样不假设只有一处）；OUTPUT 里所有跳转到本链的规则删到删不动为止
   for _ipt in iptables ip6tables; do
@@ -681,18 +701,28 @@ guard_residue() {
 }
 guard_active() { iptables -w -C OUTPUT -j $GUARD_CHAIN 2>/dev/null; }
 
+guard_sync() {
+  if ! feat_enabled "$SHIELD" || shield_paused || proxy_running || ! guard_wanted; then
+    guard_active && guard_off
+    return 0
+  fi
+  guard_hash=$(guard_signature "$(allowlisted_uids)")
+  if guard_active && iptables -w -C "$GUARD_CHAIN" -m comment --comment "xguard-$guard_hash" -j RETURN 2>/dev/null; then return 0; fi
+  guard_on
+}
+
 # hosts：默认一直挂（proxy_yield=1 才在代理服务运行时撤）；HTTPDNS IP 拦截：代理服务运行时撤，避免和它的 iptables 打架
 reconcile() {
   feat_enabled "$SHIELD" || return 0
   shield_paused && return 0
   if proxy_yield; then hosts_off; else hosts_on; fi
-  if proxy_running; then guard_off
-  elif guard_wanted; then guard_active || guard_on
-  else guard_active && guard_off; fi
+  ( splash_mutex && guard_sync )
   return 0
 }
 
-skipped() { [ -f "$SKIP" ] && grep -Fxq "$1" "$SKIP"; }
+cache_skipped() { [ -f "$SKIP" ] && grep -Fxq "$1" "$SKIP"; }
+app_allowlisted() { [ -f "$APP_ALLOW" ] && grep -Fxq "$1" "$APP_ALLOW"; }
+skipped() { cache_skipped "$1" || app_allowlisted "$1"; }
 
 # 规则合并：模块内置 + 用户自定义（$XG_DATA/shield/splash.rules）
 splash_rules() { grep -hvE '^[[:space:]]*(#|$)' "$XG_FDIR/rules/splash.rules" "$USER_RULES" 2>/dev/null | awk 'NF>=2 {p=$1; sub(/^.*:/,"",p); k=p " " $2; if (!seen[k]++) print k}'; }
@@ -849,8 +879,8 @@ splash_lock_one() {   # <app 目录> <目标>；0 = 已锁，1 = 暂不能锁（
 }
 splash_unlock_one() {   # <目标>
   [ -e "$1" ] || return 0
-  shield_chattr -i "$1"
-  [ -f "$1" ] && [ ! -s "$1" ] && rm -f "$1"
+  if shield_immutable "$1"; then shield_chattr -i "$1" || return 1; fi
+  if [ -f "$1" ] && [ ! -s "$1" ]; then rm -f "$1" || return 1; fi
   return 0
 }
 
@@ -858,6 +888,10 @@ splash_apply() (
   feat_enabled "$SHIELD" || return 0
   shield_paused && return 0
   splash_mutex || return 1
+  splash_apply_locked "$@"
+  splash_network_sync
+)
+splash_apply_locked() (
   feat_enabled "$SHIELD" && ! shield_paused || return 0
   _ll=$AD_DIR/locked.list.$$; : >"$_ll"
   splash_rules |
@@ -874,7 +908,6 @@ splash_apply() (
     awk -v p="$1" '$1!=p' "$AD_DIR/locked.list" 2>/dev/null >>"$_ll"
   fi
   sort -u "$_ll" >"$_ll.sorted"; mv -f "$_ll.sorted" "$AD_DIR/locked.list"; rm -f "$_ll"
-  splash_network_sync
 )
 splash_network_off() {
   for _ipt in iptables ip6tables; do
@@ -890,11 +923,13 @@ splash_network_off() {
 splash_network_sync() {
   _uids=""
   if feat_enabled "$SHIELD" && ! shield_paused; then
+    exempt_uids=$(allowlisted_uids | tr '\n' ' ')
     for _pkg in com.chaoxing.mobile com.chinamobile.mcloud com.xunlei.downloadprovider; do
       skipped "$_pkg" && continue
       _uid=$(stat -c %u /data/user/0/$_pkg 2>/dev/null)
       case "$_uid" in ''|*[!0-9]*) continue ;; esac
       [ "$_uid" -ge 10000 ] || continue
+      case " $exempt_uids " in *" $_uid "*) continue ;; esac
       case " $_uids " in *" $_uid "*) ;; *) _uids="$_uids $_uid" ;; esac
     done
   fi
@@ -940,19 +975,27 @@ splash_network_sync() {
   done
   return 0
 }
-splash_unlock_targets() {
+splash_unlock_targets() (
   [ -f "$AD_DIR/locked.list" ] || return 0
+  unlock_failed=0
+  : >"$AD_DIR/l.tmp" || return 1
   while read -r pkg rel; do
-    [ -n "${1:-}" ] && [ "$pkg" != "$1" ] && continue
-    splash_target "$pkg" "$rel"; splash_unlock_one "$_st"
+    if [ -n "${1:-}" ] && [ "$pkg" != "$1" ]; then
+      printf '%s %s\n' "$pkg" "$rel" >>"$AD_DIR/l.tmp"
+      continue
+    fi
+    splash_target "$pkg" "$rel"
+    if ! splash_unlock_one "$_st"; then
+      printf '%s %s\n' "$pkg" "$rel" >>"$AD_DIR/l.tmp"
+      unlock_failed=1
+    fi
   done <"$AD_DIR/locked.list"
-  if [ -n "${1:-}" ]; then awk -v p="$1" '$1!=p' "$AD_DIR/locked.list" >"$AD_DIR/l.tmp"; mv -f "$AD_DIR/l.tmp" "$AD_DIR/locked.list"
-  else rm -f "$AD_DIR/locked.list"; fi
-}
+  mv -f "$AD_DIR/l.tmp" "$AD_DIR/locked.list" && [ "$unlock_failed" = 0 ]
+)
 splash_unlock() ( splash_mutex || return 1; splash_unlock_targets "${1:-}"; )
 
 # 单个 App 解锁并记住（之后的 config/开机事件不再锁它）；relock 撤销
-splash_skip() ( valid_pkg "$1" || return 2; splash_mutex || return 1; mkdir -p "$AD_DIR"; skipped "$1" || echo "$1" >>"$SKIP"; splash_unlock_targets "$1"; splash_network_sync; log $SHIELD "已单独解锁 $1"; )
+splash_skip() ( valid_pkg "$1" || return 2; splash_mutex || return 1; mkdir -p "$AD_DIR"; splash_unlock_targets "$1" || return 1; cache_skipped "$1" || echo "$1" >>"$SKIP"; splash_network_sync; log $SHIELD "已单独解锁 $1"; )
 splash_relock() { valid_pkg "$1" || return 2; ( splash_mutex || exit 1; [ -f "$SKIP" ] && { grep -Fvx "$1" "$SKIP" >"$SKIP.tmp"; mv -f "$SKIP.tmp" "$SKIP"; }; exit 0; ) || return 1; splash_apply "$1"; log $SHIELD "已恢复锁定 $1"; }
 
 # 非注释行数；文件不存在 = 0（grep -c 无匹配时退出码 1，旧写法会输出 "0\n0"）
@@ -961,13 +1004,14 @@ cnt_lines() { _n=0; [ -f "$1" ] && _n=$(grep -cvE '^[[:space:]]*(#|$)' "$1" 2>/d
 json_esc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
 
 # 规则命中情况（JSON）：每条规则 = 包名 + 目录 + 状态
-# state: locked 已锁 / skipped 用户解锁 / pending 已安装待锁 / absent 未安装
+# state: locked 已锁 / skipped 用户解锁 / allowlisted 应用白名单 / pending 待锁 / absent 未安装
 splash_states() {
   splash_rules | while read -r pkg rel; do
     pkg=${pkg#*:}
     [ -z "${1:-}" ] || [ "$pkg" = "$1" ] || continue
     splash_target "$pkg" "$rel"
-    if skipped "$pkg"; then st=skipped
+    if app_allowlisted "$pkg"; then st=allowlisted
+    elif cache_skipped "$pkg"; then st=skipped
     elif [ ! -d "$_sb" ] && [ ! -d "/data/data/$pkg" ]; then st=absent
     elif splash_is_locked "$_st"; then st=locked
     elif splash_is_weak "$_st"; then st=weak
