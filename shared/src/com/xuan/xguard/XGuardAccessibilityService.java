@@ -55,7 +55,7 @@ public final class XGuardAccessibilityService extends AccessibilityService {
             }
             activity = event.getClassName().toString();
         }
-        if (!pkg.equals(foreground) || pkg.equals(getPackageName()) || !packageRules.containsKey(pkg)
+        if (!pkg.equals(foreground) || pkg.equals(getPackageName()) || GkdStore.isAllowlisted(this, pkg) || !packageRules.containsKey(pkg)
             || android.os.SystemClock.uptimeMillis() - started > 20000) return;
         schedule(Math.max(80, 250 - (android.os.SystemClock.uptimeMillis() - lastScan)));
     }
@@ -101,6 +101,7 @@ public final class XGuardAccessibilityService extends AccessibilityService {
         KeyguardManager keyguard = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
         if (!power.isInteractive() || keyguard.isKeyguardLocked()) return;
         refreshRules();
+        if (GkdStore.isAllowlisted(this, foreground)) return;
         List<JSONObject> rules = packageRules.get(foreground);
         if (rules == null) return;
         List<JSONObject> applicable = new ArrayList<>();
@@ -121,6 +122,7 @@ public final class XGuardAccessibilityService extends AccessibilityService {
                 firstMatches.put(key, first);
                 long remaining = rule.optLong("delay") - (now - first);
                 if (remaining > 0) { schedule(remaining); continue; }
+                if (GkdStore.isAllowlisted(this, foreground)) return;
                 if (!click(target, rule.optString("action"))) continue;
                 lastAction = now;
                 String group = rule.optString("group");

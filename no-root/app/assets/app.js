@@ -58,6 +58,7 @@ function installGkdPage() {
   element('gkd-update').onclick = () => updateGkd();
   element('gkd-accessibility-guard').disabled = true;
   element('gkd-accessibility-guard').closest('label').querySelector('small').textContent = '自动恢复需使用 Root 模块版；本版掉线后请重新开启无障碍';
+  installGkdAllowlist();
   element('gkd-authorize').onclick = () => showPermissionGuide();
   element('permission-accessibility').onclick = () => window.XGuard?.openAccessibilitySettings?.();
   element('gkd-hide-recents').closest('article').classList.add('gkd-recents-card');
@@ -75,19 +76,70 @@ function installGkdPage() {
     }
   };
 }
+function installGkdAllowlist() {
+  const picker = document.createElement('details');
+  picker.id = 'gkd-app-allowlist';
+  picker.className = 'card';
+  picker.innerHTML = '<summary>应用白名单</summary><p class="muted micro">勾选后不自动点击该应用的开屏广告，不影响 DNS 拦截或缓存锁定。</p><label for="gkd-app-search">搜索应用</label><input id="gkd-app-search" type="search" placeholder="应用名称或包名" autocomplete="off"><p id="gkd-app-count" class="muted micro" role="status"></p><div id="gkd-app-list" class="gkd-app-list"></div>';
+  element('gkd-source-list').before(picker);
+  const search = element('gkd-app-search');
+  const count = element('gkd-app-count');
+  const list = element('gkd-app-list');
+  let apps = [], loading = false, saving = false;
+  function render() {
+    const query = search.value.trim().toLowerCase();
+    const matches = apps.filter(app => app.name.toLowerCase().includes(query) || app.pkg.toLowerCase().includes(query));
+    count.textContent = '已放行 ' + apps.filter(app => app.selected).length + ' 个应用';
+    fill('gkd-app-list', matches.map(app => {
+      const toggle = document.createElement('input');
+      toggle.type = 'checkbox'; toggle.checked = app.selected; toggle.disabled = saving;
+      const item = row(app.name, app.pkg, toggle);
+      const label = document.createElement('label'); label.className = item.className; label.append(...item.children);
+      toggle.onchange = async () => {
+        saving = true;
+        for (const control of list.querySelectorAll('input')) control.disabled = true;
+        try {
+          const selected = toggle.checked;
+          await exec(['gkd', 'allowlist', app.pkg, selected ? '1' : '0']);
+          app.selected = selected;
+          count.textContent = '已放行 ' + apps.filter(item => item.selected).length + ' 个应用';
+        } catch (error) { toggle.checked = app.selected; toast(error.message || String(error)); }
+        finally {
+          saving = false;
+          render();
+        }
+      };
+      return label;
+    }), query ? '未找到匹配的应用' : '没有可选择的应用');
+  }
+  search.oninput = () => { if (!loading) render(); };
+  picker.ontoggle = async () => {
+    if (!picker.open || loading || saving) return;
+    if (!window.XGuard) { count.textContent = '请在 XGuard App 中管理白名单'; return; }
+    loading = true;
+    count.textContent = '正在读取应用…';
+    list.replaceChildren();
+    try {
+      const result = await json(exec(['gkd', 'allowlist']));
+      apps = (result.apps || []).sort((a, b) => b.selected - a.selected || a.name.localeCompare(b.name, 'zh-CN') || a.pkg.localeCompare(b.pkg));
+      render();
+    } catch (error) { count.textContent = error.message || String(error); }
+    finally { loading = false; }
+  };
+}
 async function gkdTask(handler) {
   if (gkdBusy) return;
   if (!window.XGuard) { toast('请在 XGuard App 中管理无障碍订阅'); return; }
   gkdBusy = true;
   element('gkd').setAttribute('aria-busy', 'true');
-  for (const control of element('gkd').querySelectorAll('button,input')) control.disabled = true;
+  for (const control of element('gkd').querySelectorAll('button,input')) if (!control.closest('#gkd-app-allowlist')) control.disabled = true;
   element('gkd-download-state').textContent = '正在处理，请稍候…';
   try { await handler(); element('gkd-download-state').textContent = ''; }
   catch (error) { element('gkd-download-state').textContent = error.message; toast(error.message); await loadGkd().catch(() => {}); }
   finally {
     gkdBusy = false;
     element('gkd').setAttribute('aria-busy', 'false');
-    for (const control of element('gkd').querySelectorAll('button,input')) control.disabled = false;
+    for (const control of element('gkd').querySelectorAll('button,input')) if (!control.closest('#gkd-app-allowlist')) control.disabled = false;
     syncPermissionGuide();
   }
 }

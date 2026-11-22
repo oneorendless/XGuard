@@ -8,7 +8,7 @@ FIFO=$XG_RUN/events
 is_running() {
   _p=$(cat "$PIDF" 2>/dev/null); case "$_p" in ''|*[!0-9]*) return 1 ;; esac
   kill -0 "$_p" 2>/dev/null || return 1
-  case "$(tr '\0' ' ' <"/proc/$_p/cmdline" 2>/dev/null)" in *xguardd.sh*) return 0 ;; esac
+  case "$(core_proc_args "$_p")" in *xguardd.sh*) return 0 ;; esac
   return 1
 }
 

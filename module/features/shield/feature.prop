@@ -3,7 +3,7 @@
 name=XGuard
 description=域名防护、实时活动查看、自定义封禁与放行；基于原防护引擎规则引擎的 Xuan 二创
 icon=shield-check
-version=0.9.3
+version=0.9.4
 stages=service
 order=40
 default_enabled=1

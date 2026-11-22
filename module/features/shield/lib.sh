@@ -11,6 +11,7 @@
 SHIELD=shield
 AD_DIR=$XG_DATA/$SHIELD                 # 原 $XG_DATA/adblock（迁移时改名，旧路径留软链）
 HOSTS_SRC=$AD_DIR/hosts              # 生成的 hosts（bind 模式直接挂它）
+OVERLAY_ROOT=/dev/.xguard-overlay
 SRC_DIR=$AD_DIR/src                  # 每个源的缓存：<id>.list（纯域名）+ <id>.meta
 CATALOG=$XG_FDIR/sources.list
 MARK="# XGuard"                      # hosts 首行标记
@@ -118,7 +119,8 @@ shield_ns_targets() {
 }
 shield_nsrun() {   # <pid> <cmd...>：在该进程的 mount 命名空间执行；本来就在其中则直接执行
   _p=$1; shift
-  [ "$(readlink /proc/$$/ns/mnt 2>/dev/null)" = "$(readlink "/proc/$_p/ns/mnt" 2>/dev/null)" ] && { "$@"; return; }
+  _target_ns=$(readlink "/proc/$_p/ns/mnt" 2>/dev/null) || return 1
+  [ "$(readlink /proc/$$/ns/mnt 2>/dev/null)" = "$_target_ns" ] && { "$@"; return; }
   if command -v nsenter >/dev/null 2>&1; then nsenter -t "$_p" -m -- "$@"
   elif toybox nsenter --help >/dev/null 2>&1; then toybox nsenter -t "$_p" -m -- "$@"
   else bb nsenter -t "$_p" -m -- "$@"; fi
@@ -127,6 +129,27 @@ shield_global() { shield_nsrun "$(shield_ns_pid)" "$@"; }   # 兼容旧调用：
 # 某进程看到的 /system/etc/hosts 是不是防护引擎的（首行标记）
 shield_view() { head -n1 "/proc/$1/root/system/etc/hosts" 2>/dev/null | grep -q "^$MARK"; }
 shield_view_rules() { _c=$(grep -c '^0\.0\.0\.0 ' "/proc/$1/root/system/etc/hosts" 2>/dev/null); echo "${_c:-0}"; }
+shield_overlay_upper() {
+  awk '$1 == "shield" && $2 == "/system/etc" && $3 == "overlay" {
+    count=split($4, options, ","); for (i=1; i<=count; i++) if (options[i] ~ /^upperdir=/) print substr(options[i], 10)
+  }' "/proc/$1/mounts" 2>/dev/null | while IFS= read -r upper; do
+    case "$upper" in "$OVERLAY_ROOT"/mnt-*/upper|"$AD_DIR/ov/upper") printf '%s\n' "$upper" ;; esac
+  done
+}
+
+shield_live_overlay() {
+  for target_pid in $(shield_ns_targets); do
+    shield_view "$target_pid" || continue
+    for upper in $(shield_overlay_upper "$target_pid"); do
+      if [ "/proc/$target_pid/root/system/etc/hosts" -ef "$upper/hosts" ] ||
+         ! grep -q ' /system/etc/hosts ' "/proc/$target_pid/mounts" 2>/dev/null; then
+        printf '%s\n' "$upper"
+        return 0
+      fi
+    done
+  done
+  return 1
+}
 
 # ---------- 挂载方式（参考 bindhosts post-fs-data.sh 的模式探测） ----------
 mod_on() { [ -d "/data/adb/modules/$1" ] && [ ! -f "/data/adb/modules/$1/disable" ] && [ ! -f "/data/adb/modules/$1/remove" ]; }
@@ -142,19 +165,27 @@ shield_root() {   # magisk / ksu / ksu_next / apatch / unknown
 #   hfr = APatch hosts_file_redirect KPM：写 /data/adb/hosts
 #   bind = zygote 命名空间 mount --bind（bindhosts mode 2「plain bindhosts」，所有 root 方案都能用）
 #   overlay = /system/etc 叠加层（bindhosts mode 7，bind 失败时 auto 才会用）
-shield_method() {
+shield_preferred_method() {
   _m=$(core_cfg_get $SHIELD mount_mode auto)
   [ "$_m" = auto ] || { echo "$_m"; return; }
   if mod_on hostsredirect && mod_on zygisksu; then echo zn
   elif [ -d /data/adb/ap ] && dmesg 2>/dev/null | grep -q hosts_file_redirect; then echo hfr
-  elif [ -f "$AD_DIR/method.overlay" ]; then echo overlay      # 上次 bind 失败、overlay 成功
   else echo bind; fi
+}
+shield_method() {
+  case "$(shield_preferred_method)" in
+    zn) echo zn ;;
+    hfr) echo hfr ;;
+    *) if shield_live_overlay >/dev/null; then echo overlay
+       elif hosts_views_mounted; then echo bind
+       else shield_preferred_method; fi ;;
+  esac
 }
 shield_target() {   # 该方式下 hosts 实际要写到哪
   case "$(shield_method)" in
     zn) echo /data/adb/hostsredirect/hosts ;;
     hfr) echo /data/adb/hosts ;;
-    overlay) echo "$AD_DIR/ov/upper/hosts" ;;
+    overlay) upper=$(shield_live_overlay) && printf '%s/hosts\n' "$upper" || echo "$HOSTS_SRC" ;;
     *) echo "$HOSTS_SRC" ;;
   esac
 }
@@ -168,30 +199,60 @@ stock_hosts() { printf '127.0.0.1 localhost\n::1 ip6-localhost\n'; }
 # 是否生效：bind/overlay = netd（系统 DNS）和 zygote（之后启动的 App）看到的 /system/etc/hosts 都带标记；
 # zn/hfr 读目标文件首行
 hosts_mounted() {
-  case "$(shield_method)" in
+  case "$(shield_preferred_method)" in
     zn|hfr) head -n1 "$(shield_target)" 2>/dev/null | grep -q "^$MARK" ;;
-    *) for _p in $(shield_ns_targets); do shield_view "$_p" || return 1; done; return 0 ;;
+    *) hosts_views_mounted ;;
   esac
+}
+hosts_views_mounted() {
+  for target_pid in $(shield_ns_targets); do shield_view "$target_pid" || return 1; done
 }
 shield_bound() { grep -qE ' /system/etc(/hosts)? ' "/proc/$(shield_ns_pid)/mounts" 2>/dev/null; }   # 有任何挂载（含别人的）
 
 # 把 $HOSTS_SRC 的内容送到目标（原地写，保持 inode）
-hosts_publish() {
-  _tg=$(shield_target)
-  [ "$_tg" = "$HOSTS_SRC" ] && return 0
-  mkdir -p "${_tg%/*}"; cat "$HOSTS_SRC" >"$_tg"; hosts_set_perm "$_tg"
+hosts_write() {
+  mkdir -p "${1%/*}" && cat "$HOSTS_SRC" >"$1" || return 1
+  hosts_set_perm "$1" || :
 }
+hosts_publish() (
+  case "$(shield_preferred_method)" in
+    zn) hosts_write /data/adb/hostsredirect/hosts ;;
+    hfr) hosts_write /data/adb/hosts ;;
+    *)
+      for target_pid in $(shield_ns_targets); do
+        [ -n "$(shield_overlay_upper "$target_pid")" ] && shield_view "$target_pid" || continue
+        view="/proc/$target_pid/root/system/etc/hosts"
+        cmp -s "$HOSTS_SRC" "$view" || cat "$HOSTS_SRC" >"$view" || return 1
+      done ;;
+  esac
+)
 
-overlay_mount() {
-  mkdir -p "$AD_DIR/ov/upper" "$AD_DIR/ov/work"
-  cat "$HOSTS_SRC" >"$AD_DIR/ov/upper/hosts"; hosts_set_perm "$AD_DIR/ov/upper/hosts"
-  _ok=0
-  for _p in $(shield_ns_targets); do
-    shield_view "$_p" && { _ok=1; continue; }
-    shield_nsrun "$_p" mount -t overlay -o "lowerdir=/system/etc,upperdir=$AD_DIR/ov/upper,workdir=$AD_DIR/ov/work" shield /system/etc && _ok=1
+shield_mount_try() (
+  target_pid=$1; operation=$2; shift 2
+  namespace=$(readlink "/proc/$target_pid/ns/mnt" 2>/dev/null)
+  shield_nsrun "$target_pid" "$@" && return 0
+  result=$?
+  printf '%s pid=%s ns=%s rc=%s\n' "$operation" "$target_pid" "${namespace:-gone}" "$result" >&2
+  return "$result"
+)
+
+overlay_mount() (
+  for target_pid in $(shield_ns_targets); do
+    shield_view "$target_pid" && continue
+    namespace=$(readlink "/proc/$target_pid/ns/mnt" 2>/dev/null) || continue
+    namespace=${namespace#mnt:\[}; namespace=${namespace%\]}
+    case "$namespace" in ''|*[!0-9]*) continue ;; esac
+    mkdir -p "$OVERLAY_ROOT" && chmod 0700 "$OVERLAY_ROOT" || return 1
+    storage=$(mktemp -d "$OVERLAY_ROOT/mnt-$namespace.XXXXXX") || return 1
+    if ! mkdir "$storage/work" || ! hosts_write "$storage/upper/hosts"; then
+      printf 'overlay storage failed pid=%s ns=%s\n' "$target_pid" "$namespace" >&2
+      rm -rf "$storage"
+      continue
+    fi
+    shield_mount_try "$target_pid" overlay mount -t overlay -o "lowerdir=/system/etc,upperdir=$storage/upper,workdir=$storage/work" shield /system/etc || rm -rf "$storage"
   done
-  [ $_ok = 1 ]
-}
+  hosts_views_mounted
+)
 
 # 可选隐藏（hide=1）：登记给 KernelSU / susfs 的 try_umount，开了「卸载模块」的 App 里会撤掉挂载。
 # 默认不登记：去广告要的是所有 App 都生效（bindhosts 的 mode 1/10 是为了隐藏，方向相反）
@@ -202,16 +263,19 @@ shield_hide() {
 }
 
 # bind：在 netd / zygote 各自的命名空间里挂（同一 peer group 时第一次挂载会传播过去，第二个就跳过）
-bind_mount_all() {
+bind_mount_all() (
   for _p in $(shield_ns_targets); do
     shield_view "$_p" && continue
     # 别人（旧防护引擎 / 其他模块）留下的 bind 先卸掉，参考 Re-Malwack remount_hosts
-    grep -q ' /system/etc/hosts ' "/proc/$_p/mounts" 2>/dev/null && shield_nsrun "$_p" umount -l /system/etc/hosts 2>/dev/null
-    shield_nsrun "$_p" mount -o bind "$HOSTS_SRC" /system/etc/hosts 2>>"$AD_DIR/mount.err" ||
-      shield_nsrun "$_p" mount --bind "$HOSTS_SRC" /system/etc/hosts 2>>"$AD_DIR/mount.err"
+    grep -q ' /system/etc/hosts ' "/proc/$_p/mounts" 2>/dev/null && shield_mount_try "$_p" umount umount -l /system/etc/hosts
+    shield_mount_try "$_p" 'mount -o bind' mount -o bind "$HOSTS_SRC" /system/etc/hosts ||
+      shield_mount_try "$_p" 'mount --bind' mount --bind "$HOSTS_SRC" /system/etc/hosts
   done
-  hosts_mounted
-}
+  hosts_views_mounted
+)
+
+mount_error_head() { head -c 400 "$AD_DIR/mount.err" 2>/dev/null | tr '[:cntrl:]' ' '; }
+mount_fallback() { cat "$AD_DIR/mount.fallback" 2>/dev/null || echo none; }
 
 hosts_on() (
   feat_enabled "$SHIELD" && ! shield_paused || return 0
@@ -220,31 +284,42 @@ hosts_on() (
   [ -s "$HOSTS_SRC" ] || return 1
   head -n1 "$HOSTS_SRC" | grep -q "^$MARK" || return 1
   hosts_set_perm "$HOSTS_SRC"
-  _me=$(shield_method)
+  rm -f "$AD_DIR/method.overlay"
+  _me=$(shield_preferred_method)
   case "$_me" in
-    zn|hfr) hosts_mounted && return 0
+    zn|hfr) rm -f "$AD_DIR/mount.fallback" "$AD_DIR/mount.err" "$AD_DIR/mount.fail"
+      hosts_mounted && return 0
       hosts_publish && log $SHIELD "hosts 已写入 $(shield_target)（$_me 重定向，新启动的 App 生效）"; return ;;
-    overlay) hosts_mounted && { hosts_publish; return 0; }
-      if overlay_mount && hosts_mounted; then log $SHIELD "hosts 已用 overlay 挂载"; return 0; fi
-      log $SHIELD "overlay 挂载失败"; return 1 ;;
   esac
-  hosts_mounted && return 0
+  if hosts_views_mounted; then hosts_publish; return; fi
+  rm -f "$AD_DIR/mount.fallback"
   : >"$AD_DIR/mount.err"
-  if bind_mount_all; then
-    rm -f "$AD_DIR/method.overlay" "$AD_DIR/mount.fail"; shield_hide
-    log $SHIELD "hosts 已挂载（bind，netd pid=$(shield_netd_pid) / zygote pid=$(shield_ns_pid)；系统 DNS 立即生效，已在运行的 App 若有自带 DNS 缓存需重开）"
+  if [ "$_me" = overlay ]; then
+    if ! overlay_mount 2>>"$AD_DIR/mount.err"; then
+      echo bind_after_overlay_fail >"$AD_DIR/mount.fallback"
+      bind_mount_all 2>>"$AD_DIR/mount.err"
+    fi
+  elif ! bind_mount_all 2>>"$AD_DIR/mount.err" && [ "$(core_cfg_get $SHIELD mount_mode auto)" = auto ]; then
+    echo overlay_after_bind_fail >"$AD_DIR/mount.fallback"
+    overlay_mount 2>>"$AD_DIR/mount.err"
+  fi
+  if hosts_views_mounted && hosts_publish; then
+    rm -f "$AD_DIR/mount.fail"; shield_hide
+    log $SHIELD "hosts 已挂载（$(shield_method)，netd pid=$(shield_netd_pid) / zygote pid=$(shield_ns_pid)，fallback=$(mount_fallback)）$(mount_error_head)"
     return 0
   fi
-  # 失败日志 1 小时最多一条（net / tick 事件会反复重试）
-  _fl=1; [ $(( $(date +%s) - $(cat "$AD_DIR/mount.fail" 2>/dev/null || echo 0) )) -lt 3600 ] && _fl=0
-  [ $_fl = 1 ] && log $SHIELD "bind 挂载失败（netd=$(shield_netd_pid) zygote=$(shield_ns_pid)）：$(head -c 200 "$AD_DIR/mount.err" 2>/dev/null | tr '\n' ' ')，尝试 overlay"
-  [ "$(core_cfg_get $SHIELD mount_mode auto)" = auto ] || { date +%s >"$AD_DIR/mount.fail"; return 1; }
-  if overlay_mount && hosts_mounted; then touch "$AD_DIR/method.overlay"; rm -f "$AD_DIR/mount.fail"; log $SHIELD "hosts 已用 overlay 挂载（bind 不可用）"; return 0; fi
-  [ $_fl = 1 ] && log $SHIELD "hosts 挂载失败：bind 和 overlay 都不行"
-  date +%s >"$AD_DIR/mount.fail"; return 1
+  for target_pid in $(shield_ns_targets); do
+    shield_view "$target_pid" || printf 'hosts not visible pid=%s ns=%s\n' "$target_pid" "$(readlink "/proc/$target_pid/ns/mnt" 2>/dev/null)" >>"$AD_DIR/mount.err"
+  done
+  if [ $(( $(date +%s) - $(cat "$AD_DIR/mount.fail" 2>/dev/null || echo 0) )) -ge 3600 ]; then
+    log $SHIELD "hosts 挂载失败（$_me，fallback=$(mount_fallback)）：$(mount_error_head)"
+    date +%s >"$AD_DIR/mount.fail"
+  fi
+  return 1
 )
 hosts_off() (
   recovery_lock mount || return 1
+  rm -f "$AD_DIR/method.overlay" "$AD_DIR/mount.fallback" "$AD_DIR/mount.fail" "$AD_DIR/mount.err"
   # zn / hfr：目标文件还是防护引擎写的就恢复默认
   for _tg in /data/adb/hostsredirect/hosts /data/adb/hosts; do
     head -n1 "$_tg" 2>/dev/null | grep -q "^$MARK" && { stock_hosts >"$_tg"; hosts_set_perm "$_tg"; log $SHIELD "hosts 重定向 $_tg 已恢复默认"; }
@@ -260,8 +335,9 @@ hosts_off() (
     shield_view "$_p" || continue
     _n=0
     while shield_view "$_p" && [ $_n -lt 4 ]; do
-      if grep -q '^shield /system/etc overlay ' "/proc/$_p/mounts" 2>/dev/null; then shield_nsrun "$_p" umount -l /system/etc 2>/dev/null
-      else shield_nsrun "$_p" umount -l /system/etc/hosts 2>/dev/null; fi
+      if grep -q ' /system/etc/hosts ' "/proc/$_p/mounts" 2>/dev/null; then shield_nsrun "$_p" umount -l /system/etc/hosts 2>/dev/null
+      elif [ -n "$(shield_overlay_upper "$_p")" ]; then shield_nsrun "$_p" umount -l /system/etc 2>/dev/null
+      else break; fi
       _n=$((_n+1)); _did=$((_did+1))
     done
     shield_view "$_p" && log $SHIELD "警告：pid $_p 的命名空间里 hosts 卸不掉（$(grep -E ' /system/etc(/hosts)? ' "/proc/$_p/mounts" | head -n1)）"
@@ -339,18 +415,31 @@ hosts_build() (
   { printf '%s %s rules=%s\n127.0.0.1 localhost\n::1 ip6-localhost\n' "$MARK" "$(date +%s)" "$rules"; cat "$tmp.body"; } >"$tmp"
   rm -f "$tmp.body"
   if [ "${rules:-0}" -eq 0 ] && [ ! -s "$BLOCK" ]; then rm -f "$tmp"; return 1; fi
-  # 内容没变（忽略首行时间戳）就不动
-  if [ -s "$HOSTS_SRC" ] && [ "$(sed 1d "$tmp" | cksum)" = "$(sed 1d "$HOSTS_SRC" | cksum)" ]; then rm -f "$tmp"; meta_set rules "$rules"; return 0; fi
-  if [ -f "$HOSTS_SRC" ]; then cp -p "$HOSTS_SRC" "$AD_DIR/hosts.write-backup" || { rm -f "$tmp"; return 1; }; fi
-  if ! cat "$tmp" >"$HOSTS_SRC"; then
-    [ ! -f "$AD_DIR/hosts.write-backup" ] || cat "$AD_DIR/hosts.write-backup" >"$HOSTS_SRC"
-    rm -f "$tmp" "$AD_DIR/hosts.write-backup"; return 1
-  fi
-  rm -f "$tmp" "$AD_DIR/hosts.write-backup"; hosts_set_perm "$HOSTS_SRC"
+  if ! ( recovery_lock mount && hosts_replace "$tmp" ); then rm -f "$tmp"; return 1; fi
   meta_set rules "$rules"; meta_set capped "$(prop_get "$AD_DIR/build.cnt" cut 0)"; meta_set allowed_hits "$(prop_get "$AD_DIR/build.cnt" allowed 0)"
-  hosts_mounted && hosts_publish
   return 0
 )
+
+hosts_replace() {
+  tmp=$1
+  # 内容没变（忽略首行时间戳）就不动
+  if [ ! -s "$HOSTS_SRC" ] || [ "$(sed 1d "$tmp" | cksum)" != "$(sed 1d "$HOSTS_SRC" | cksum)" ]; then
+    if [ -f "$HOSTS_SRC" ]; then cp -p "$HOSTS_SRC" "$AD_DIR/hosts.write-backup" || return 1; fi
+    if ! cat "$tmp" >"$HOSTS_SRC"; then
+      [ ! -f "$AD_DIR/hosts.write-backup" ] || cat "$AD_DIR/hosts.write-backup" >"$HOSTS_SRC"
+      rm -f "$AD_DIR/hosts.write-backup"; return 1
+    fi
+    rm -f "$AD_DIR/hosts.write-backup"; hosts_set_perm "$HOSTS_SRC"
+  fi
+  rm -f "$tmp"
+  if feat_enabled "$SHIELD" && ! shield_paused && ! proxy_yield; then
+    case "$(shield_preferred_method)" in
+      zn|hfr) if hosts_mounted; then hosts_publish || return 1; fi ;;
+      *) hosts_publish || return 1 ;;
+    esac
+  fi
+  return 0
+}
 meta_set() { prop_set "$META" "$1" "$2"; }
 
 # 下载：curl（系统 CA）→ curl 指定 Android CA 目录 → busybox wget --no-check-certificate（同 bindhosts / Re-Malwack）。
@@ -480,7 +569,7 @@ auto_running() {
   _ap=$(cat "$AUTO_PID" 2>/dev/null)
   case "$_ap" in ''|*[!0-9]*) return 1 ;; esac
   kill -0 "$_ap" 2>/dev/null || return 1
-  case "$(tr '\0' ' ' <"/proc/$_ap/cmdline" 2>/dev/null)" in *autoupdate.sh*) return 0 ;; esac
+  case "$(core_proc_args "$_ap")" in *autoupdate.sh*) return 0 ;; esac
   return 1
 }
 # 后台启动（脱离 xguardd / feat_run 的超时进程组）；已有一个在跑就不重复起
@@ -969,6 +1058,7 @@ stats_json() {
     "$(cat_ids | grep -c .)" "$(cnt_lines "$BUILTIN_ALLOW")" "$_as" "$(prop_get "$AUTO_STATE" next 0)" "$(prop_get "$AUTO_STATE" try 0)"
   if [ "${1:-}" = quick ]; then printf '[]'; else sources_json; fi
   printf ',"locked_count_cached":%s,"locked_checked_at":%s' "$locked_cached" "$locked_checked"
+  printf ',"mount_fallback":"%s","mount_err_head":"%s"' "$(mount_fallback)" "$(json_esc "$(mount_error_head)")"
   printf '}\n'
 }
 
@@ -993,6 +1083,7 @@ shield_write_status() {
   mode=$(shield_mode)
   locked=$(splash_locked_count)
   core_status_write $SHIELD summary="${1:-$(shield_summary)}" mode="$mode" method="$(shield_method)" hosts_rules="$(hosts_rules)" \
+    mount_fallback="$(mount_fallback)" mount_err_head="$(mount_error_head)" \
     last_ok="$(prop_get "$META" last_ok 0)" result="$(prop_get "$META" result none)" sources="$(active_ids | grep -c .)" \
     splash_locked_apps="$locked" splash_skipped_apps="$(cnt_lines "$SKIP")" \
     allow_count="$(cnt_lines "$ALLOW")" block_count="$(cnt_lines "$BLOCK")" user_rules="$(cnt_lines "$USER_RULES")"

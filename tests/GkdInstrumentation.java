@@ -38,7 +38,24 @@ public final class GkdInstrumentation extends Instrumentation {
             for (String source : new String[]{"xguard-local", "lin-arm", "ganlinte", "aisouler"}) command("gkd", "toggle", source, "0");
             check(GkdStore.enabledRules(getTargetContext()).length() == 0, "all disabled stays empty");
             command("gkd", "toggle", "xguard-local", "1");
-            check(GkdStore.enabledRules(getTargetContext()).length() == 3, "local source enabled");
+            JSONArray local = GkdStore.enabledRules(getTargetContext());
+            check(local.length() == 6, "local source enabled with Xiaomi rules");
+            int xiaomi = 0;
+            for (int index = 0; index < local.length(); index++) {
+                JSONObject item = local.getJSONObject(index);
+                if (!item.getString("package").startsWith("com.xiaomi.")) continue;
+                xiaomi++;
+                check("clickNode".equals(item.getString("action")) && item.getInt("groupMaximum") == 1
+                    && item.getInt("time") == 8000 && item.getJSONArray("group_activityIds").length() == 1,
+                    "Xiaomi requires activity and a single non-coordinate click");
+            }
+            check(xiaomi == 3, "both Xiaomi apps compiled");
+            String protectedApp = "com.xiaomi.shop";
+            command("gkd", "allowlist", protectedApp, "1");
+            check(GkdStore.isAllowlisted(getTargetContext(), protectedApp), "allowlist add visible to service");
+            check(new JSONObject(command("gkd", "allowlist")).getJSONArray("apps").toString().contains(protectedApp), "selected package remains listed when uninstalled");
+            command("gkd", "allowlist", protectedApp, "0");
+            check(!GkdStore.isAllowlisted(getTargetContext(), protectedApp), "allowlist remove visible to service");
             command("gkd", "toggle", "lin-arm", "1");
             JSONObject sources = new JSONObject(command("gkd", "sources"));
             JSONObject remote = sources.getJSONArray("list").getJSONObject(2);

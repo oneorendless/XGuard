@@ -60,7 +60,7 @@ hctx=$(ls -Z "$HOSTS_SRC" 2>/dev/null | awk '{print $1}')
 apps=""; bad=0
 if [ "$me" = bind ] || [ "$me" = overlay ]; then
   for pid in $(ps -A -o PID,USER,NAME 2>/dev/null | awk '$2 ~ /^u[0-9]+_a[0-9]+$/ && $3 !~ /xguard/ && $3 !~ /:/ {print $1}' | head -n 3); do
-    name=$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | cut -d' ' -f1)
+    name=$(core_proc_args "$pid" | cut -d' ' -f1)
     n=$(shield_view_rules "$pid")
     [ "${n:-0}" -gt 0 ] || bad=$((bad+1))
     apps="$apps${apps:+,}{\"pkg\":\"$(json_esc "$name")\",\"rules\":${n:-0}}"

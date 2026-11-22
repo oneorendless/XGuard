@@ -1,7 +1,7 @@
 {
   "id": 9001,
   "name": "XGuard 本地补充",
-  "version": 1,
+  "version": 2,
   "author": "Xuan",
   "apps": [
     {
@@ -65,6 +65,50 @@
                 "[text*=\"跳过\" || desc*=\"跳过\"][text.length<12][desc.length<12][visibleToUser=true]",
                 "[vid=\"tt_splash_skip_btn\" || vid=\"ksad_splash_skip_left_view\" || vid=\"ksad_splash_skip_right_view\"][visibleToUser=true]"
               ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "com.xiaomi.vipaccount",
+      "name": "小米社区",
+      "groups": [
+        {
+          "key": 1,
+          "name": "开屏广告-跳过控件",
+          "activityIds": ["com.xiaomi.mi.launch.process.OpenScreenActivity"],
+          "matchTime": 8000,
+          "actionMaximum": 1,
+          "rules": [
+            {
+              "action": "clickNode",
+              "anyMatches": ["[id=\"com.xiaomi.vipaccount:id/tv_skip\"][clickable=true]"]
+            },
+            {
+              "action": "clickNode",
+              "matches": "[id=\"com.xiaomi.vipaccount:id/iv_open_screen\"]",
+              "anyMatches": ["[text^=\"跳过\"][text!*=\"详情\"][text.length<12][clickable=true]"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "com.xiaomi.shop",
+      "name": "小米商城",
+      "groups": [
+        {
+          "key": 1,
+          "name": "开屏广告-跳过控件",
+          "activityIds": ["com.xiaomi.shop.activity.MainTabActivity"],
+          "matchTime": 8000,
+          "actionMaximum": 1,
+          "rules": [
+            {
+              "action": "clickNode",
+              "matches": "[vid=\"bg_splash_logo\"]",
+              "anyMatches": ["[id=\"com.xiaomi.shop:id/skip\"][clickable=true]", "[text^=\"跳过\"][text!*=\"立即查看\"][text.length<12][clickable=true]"]
             }
           ]
         }

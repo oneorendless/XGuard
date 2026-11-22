@@ -29,7 +29,7 @@ recovery_lock() {
 recovery_watchdog_start() {
   _wp=$(cat "$XG_RUN/recovery-watchdog.lock/pid" 2>/dev/null)
   case "$_wp" in ''|*[!0-9]*) ;; *)
-    if kill -0 "$_wp" 2>/dev/null && tr '\0' ' ' <"/proc/$_wp/cmdline" 2>/dev/null | grep -q 'core/watchdog.sh'; then return 0; fi ;;
+    if kill -0 "$_wp" 2>/dev/null && core_proc_args "$_wp" | grep -q 'core/watchdog.sh'; then return 0; fi ;;
   esac
   nohup setsid sh "$XG_MODDIR/core/watchdog.sh" </dev/null >/dev/null 2>&1 &
 }
@@ -185,9 +185,7 @@ recovery_json() {
 
 health_monitor_alive() {
   _mp=$(cat "$XG_STATE/monitor.pid" 2>/dev/null)
-  case "$_mp" in ''|*[!0-9]*) return 1 ;; esac
-  kill -0 "$_mp" 2>/dev/null && case "$(tr '\0' ' ' <"/proc/$_mp/cmdline" 2>/dev/null)" in *xguard-monitor*) return 0 ;; esac
-  return 1
+  core_proc_comm_matches "$_mp" xguard-monitor
 }
 health_check() (
   recovery_lock health || exit 1

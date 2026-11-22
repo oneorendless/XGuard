@@ -13,13 +13,16 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import android.util.AtomicFile;
 
 public final class GkdStore {
     private static final long MAX_BYTES = 12L * 1024L * 1024L;
     private static final Source[] CATALOG = {
-        new Source("xguard-local", "XGuard 本地补充", "学习通、移动云盘、迅雷开屏补充", ""),
+        new Source("xguard-local", "XGuard 本地补充", "学习通、移动云盘、迅雷、小米社区、小米商城开屏补充", ""),
         new Source("aisouler", "AIsouler GKD 订阅", "社区订阅（上游已停止维护），仅导入兼容开屏规则", "https://raw.githubusercontent.com/AIsouler/GKD_subscription/main/dist/AIsouler_gkd.json5"),
         new Source("lin-arm", "Lin-arm GKD 订阅", "社区订阅，仅导入兼容开屏规则", "https://raw.githubusercontent.com/Lin-arm/GKD_subscription/main/dist/gkd.json5"),
         new Source("ganlinte", "ganlinte GKD 订阅", "社区订阅，仅导入兼容开屏规则", "https://raw.githubusercontent.com/ganlinte/GKD-subscription/main/dist/ganlin_gkd.json5")
@@ -40,6 +43,19 @@ public final class GkdStore {
             return sources(context).toString();
         }
         if ("sources".equals(operation)) return sources(context).toString();
+        if ("allowlist".equals(operation)) {
+            Set<String> selected = allowlist(context);
+            if (args.length() > 2) {
+                String pkg = args.getString(2), value = args.getString(3);
+                if (!AppCatalog.isPackageName(pkg) || context.getPackageName().equals(pkg)
+                    || !("1".equals(value) || "0".equals(value))) throw new IllegalArgumentException("无效的应用白名单设置");
+                selected = new HashSet<>(selected);
+                if ("1".equals(value)) selected.add(pkg); else selected.remove(pkg);
+                prefs.edit().putStringSet("gkd_allowlist", selected).apply();
+                return new JSONObject().put("count", selected.size()).toString();
+            }
+            return new JSONObject().put("apps", AppCatalog.selectable(context, selected)).toString();
+        }
         if ("toggle".equals(operation)) {
             Source source = source(context, args.getString(2));
             boolean enabled = "1".equals(args.getString(3));
@@ -86,6 +102,14 @@ public final class GkdStore {
             return new JSONObject().put("updated", updated).put("failed", failures.length()).put("errors", failures).toString();
         }
         throw new IllegalArgumentException("未知 GKD 操作");
+    }
+
+    private static Set<String> allowlist(Context context) {
+        return prefs(context).getStringSet("gkd_allowlist", Collections.emptySet());
+    }
+
+    static boolean isAllowlisted(Context context, String pkg) {
+        return allowlist(context).contains(pkg);
     }
 
     public static JSONArray enabledRules(Context context) {

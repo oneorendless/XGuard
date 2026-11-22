@@ -4,7 +4,7 @@
 sh "$XG_MODDIR/core/monitor.sh" stop >/dev/null 2>&1
 if auto_running; then
   _auto_pid=$(cat "$AUTO_PID")
-  case "$(tr '\0' ' ' <"/proc/$_auto_pid/cmdline" 2>/dev/null)" in *autoupdate.sh*) kill "$_auto_pid" 2>/dev/null ;; esac
+  case "$(core_proc_args "$_auto_pid")" in *autoupdate.sh*) kill "$_auto_pid" 2>/dev/null ;; esac
 fi
 rm -f "$AUTO_PID"
 hosts_off

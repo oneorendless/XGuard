@@ -101,3 +101,4 @@ html[data-glass-renderer=solid] .editor-details .card{background:transparent}
 .log-event-title { display:block; margin-top:4px; font-size:14px; }
 .log-attention { color:var(--on-surface); font-weight:700; }
 #log-details { border-top:1px solid var(--divider); margin-bottom:12px; }
+.gkd-app-list{max-height:17rem;overflow-y:auto;overscroll-behavior:contain}.gkd-app-list .row>span{min-width:0;overflow-wrap:anywhere}

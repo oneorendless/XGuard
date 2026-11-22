@@ -9,10 +9,7 @@ SNAP=$RUNTIME/activity.json
 ERR=$STATE/monitor.err
 alive() {
   pid=$(cat "$PIDFILE" 2>/dev/null)
-  case "$pid" in ''|*[!0-9]*) return 1 ;; esac
-  kill -0 "$pid" 2>/dev/null || return 1
-  case "$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null)" in *xguard-monitor*) return 0 ;; esac
-  return 1
+  core_proc_comm_matches "$pid" xguard-monitor
 }
 start() {
   alive && return 0
@@ -33,9 +30,9 @@ start() {
   feat_enabled shield && [ ! -f "$XG_STATE/temporary-pause" ] || return 0
   rm -f "$ERR" "$SNAP"
   nohup "$binary" -output "$SNAP" -hosts "$XG_DATA/shield/hosts" </dev/null >"$ERR" 2>&1 &
-  echo $! >"$PIDFILE"
-  n=0; while [ "$n" -lt 10 ]; do [ -s "$SNAP" ] && return 0; alive || break; sleep 0.1; n=$((n+1)); done
-  [ -s "$SNAP" ] && return 0
+  launched=$!; echo "$launched" >"$PIDFILE"
+  n=0; while [ "$n" -lt 10 ]; do [ -s "$SNAP" ] && alive && return 0; kill -0 "$launched" 2>/dev/null || break; sleep 0.1; n=$((n+1)); done
+  [ -s "$SNAP" ] && alive && return 0
   [ -s "$ERR" ] || echo '采集组件未就绪；请查看 Root 权限与 SELinux 日志' >"$ERR"
   return 1
 }

@@ -1,6 +1,16 @@
 #!/system/bin/sh
 . "$XG_MODDIR/core/env.sh"
 
+core_proc_comm_matches() {
+  case "$1" in ''|0|*[!0-9]*) return 1 ;; esac
+  kill -0 "$1" 2>/dev/null && [ "$(cat "/proc/$1/comm" 2>/dev/null)" = "$2" ]
+}
+
+core_proc_args() {
+  case "$1" in ''|0|*[!0-9]*) return 1 ;; esac
+  bb timeout 2 cat "/proc/$1/cmdline" 2>/dev/null | tr '\0' ' '
+}
+
 core_init_dirs() {
   mkdir -p "$XG_CFG" "$XG_STATE" "$XG_LOG" "$XG_RUN"
   chmod 0700 "$XG_DATA"

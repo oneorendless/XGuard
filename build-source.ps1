@@ -1,4 +1,4 @@
-param([string]$OutputFile=(Join-Path $PSScriptRoot 'dist/XGuard-v0.9.3-source.zip'))
+param([string]$OutputFile=(Join-Path $PSScriptRoot 'dist/XGuard-v0.9.4-source.zip'))
 $ErrorActionPreference='Stop'
 $files=@(& git -C $PSScriptRoot -c core.quotepath=false ls-files --cached --others --exclude-standard)
 if($LASTEXITCODE -ne 0){throw '需要在源码工作区运行此脚本'}
