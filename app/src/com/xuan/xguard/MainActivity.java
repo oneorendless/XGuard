@@ -31,6 +31,7 @@ import org.json.JSONObject;
 public final class MainActivity extends Activity {
     private WebView webView;
     private final ExecutorService executor = Executors.newCachedThreadPool();
+    private final AppUpdates updates = new AppUpdates(this, false);
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
@@ -104,6 +105,7 @@ public final class MainActivity extends Activity {
     }
 
     private final class RootBridge {
+        @JavascriptInterface public void openAppUpdate() { updates.openDownload(); }
         @JavascriptInterface public void setTheme(final boolean dark) {
             runOnUiThread(() -> {
                 if (webView == null || isFinishing()) return;
@@ -203,6 +205,10 @@ public final class MainActivity extends Activity {
                 String output;
                 try {
                     JSONArray values = new JSONArray(arguments);
+                    if (values.length() == 1 && "app-update".equals(values.optString(0))) {
+                        deliver(callback, 0, updates.check());
+                        return;
+                    }
                     if (values.length() > 0 && "gkd".equals(values.getString(0))) {
                         deliver(callback, 0, handleGkd(values));
                         return;

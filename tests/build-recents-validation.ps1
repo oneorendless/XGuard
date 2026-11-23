@@ -26,5 +26,5 @@ $builder=[IO.File]::ReadAllText($builderPath).Replace("name='com.xuan.xguard'",(
 $script=Join-Path $variantRoot 'build-app.ps1'
 [IO.File]::WriteAllText($script,$builder,[Text.UTF8Encoding]::new($false))
 & $script -AndroidSdk (Resolve-Path -LiteralPath $AndroidSdk).Path -KeyStore (Resolve-Path -LiteralPath $KeyStore).Path
-$built=if($Variant -eq 'root'){Join-Path $variantRoot 'module/app/xguard.apk'}else{Join-Path $variantRoot 'XGuard-v0.9.4-no-root.apk'}
+$built=if($Variant -eq 'root'){Join-Path $variantRoot 'module/app/xguard.apk'}else{Join-Path $variantRoot 'XGuard-v0.9.5-no-root.apk'}
 Copy-Item -LiteralPath $built -Destination (Join-Path $repo "dist/device-check/XGuard-v0.9.2-recents-$Variant-validation.apk") -Force

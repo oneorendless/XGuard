@@ -1,4 +1,4 @@
-# XGuard 0.9.4 无 Root 版
+# XGuard 0.9.5 无 Root 版
 
 这个目录是在 XGuard 模块版 v0.8.3 基础上制作的无 Root 版本。WebView 页面、液态玻璃样式、导航和交互沿用模块版；网络层改为 Android `VpnService`，只接管发往本地 DNS 的 UDP 查询。项目基于原作者 **惜故里丶** 的原始作品进行二次创作，感谢原作者与各规则维护者，具体见仓库根目录的 `ACKNOWLEDGEMENTS.md`。
 
@@ -34,7 +34,7 @@ $env:XGUARD_KEY_PASS='签名密码'
 ./build-app.ps1 -AndroidSdk 'C:\Android\Sdk' -KeyStore 'C:\keys\xguard.jks'
 ```
 
-输出为 `XGuard-v0.9.4-no-root.apk`。无 Root 版使用包名 `com.xuan.xguard`、版本名 `0.9.4-noroot`，最低支持 Android 6.0；两个正式 APK 不能同时安装，切换前先备份所需设置。
+输出为 `XGuard-v0.9.5-no-root.apk`。无 Root 版使用包名 `com.xuan.xguard`、版本名 `0.9.5-noroot`，最低支持 Android 6.0；两个正式 APK 不能同时安装，切换前先备份所需设置。
 
 v0.9.2 增加 GKD 页面中的隐藏最近任务开关和可选 GKD 风格无障碍 UI 规则，可按来源分别勾选，真实下载和缓存网上 HTTPS 订阅；仅执行安全兼容子集，不支持的复杂选择器整条跳过。首次打开弹窗会显示 VPN 与无障碍状态；规则来源开关由用户控制。详见 [致谢](../ACKNOWLEDGEMENTS.md) 和 `assets/GPL-3.0.txt`。
 

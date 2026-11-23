@@ -63,6 +63,7 @@ public final class MainActivity extends Activity {
     };
     private WebView webView;
     private final ExecutorService executor = Executors.newCachedThreadPool();
+    private final AppUpdates updates = new AppUpdates(this, true);
     private String pendingVpnCallback;
 
     @Override public void onCreate(Bundle state) {
@@ -228,6 +229,7 @@ public final class MainActivity extends Activity {
     }
 
     private final class XGuardBridge {
+        @JavascriptInterface public void openAppUpdate() { updates.openDownload(); }
         @JavascriptInterface public String getMode() { return "vpn"; }
         @JavascriptInterface public boolean isVpnPrepared() { return VpnService.prepare(MainActivity.this) == null; }
         @JavascriptInterface public void setTheme(final boolean dark) {
@@ -283,6 +285,7 @@ public final class MainActivity extends Activity {
         private String dispatch(JSONArray values) throws Exception {
             if (values.length() == 0) throw new IllegalArgumentException("缺少操作");
             String command = values.getString(0);
+            if (values.length() == 1 && "app-update".equals(command)) return updates.check();
             if ("gkd".equals(command)) return GkdStore.handle(MainActivity.this, values, XGuardVpnService::applyAllowlist);
             if ("apps".equals(command)) return AppCatalog.describe(MainActivity.this, values);
             if ("status".equals(command)) return statusJson();
@@ -316,7 +319,7 @@ public final class MainActivity extends Activity {
             boolean enabled = getSharedPreferences("xguard", MODE_PRIVATE).getBoolean("enabled", false);
             boolean running = XGuardVpnService.isRunning(), paused = RecoveryStore.isPaused(MainActivity.this);
             JSONObject feature = new JSONObject(); feature.put("enabled", enabled); feature.put("conflict", false); feature.put("health", enabled && !running ? "VPN 服务未运行" : "ok"); feature.put("pause_until", paused ? RecoveryStore.pausedUntil(MainActivity.this) : 0); feature.put("summary", !enabled ? "点击开关开启本地 VPN 防护" : !running ? "防护已开启，但 VPN 服务未运行，请检查并修复" : paused ? "临时暂停 DNS 拦截，VPN 继续转发 DNS" : "本地 VPN 正在拦截广告域名");
-            JSONObject result = new JSONObject(); result.put("root", "无 Root · Android VPN"); result.put("daemon", running ? "前台服务运行中" : "未运行"); result.put("safe_mode", false); result.put("version", "v0.9.4-noroot"); result.put("features", new JSONArray().put(feature));
+            JSONObject result = new JSONObject(); result.put("root", "无 Root · Android VPN"); result.put("daemon", running ? "前台服务运行中" : "未运行"); result.put("safe_mode", false); result.put("version", "v" + updates.installedVersion()); result.put("features", new JSONArray().put(feature));
             return result.toString();
         }
         private String statsJson(SharedPreferences prefs) throws Exception {

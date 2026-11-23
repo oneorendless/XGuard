@@ -16,4 +16,4 @@ $script=Join-Path $variant 'build-app.ps1'
 [IO.File]::WriteAllText($script,$builder,[Text.UTF8Encoding]::new($false))
 & $script -AndroidSdk (Resolve-Path -LiteralPath $AndroidSdk).Path -KeyStore (Resolve-Path -LiteralPath $KeyStore).Path
 New-Item -ItemType Directory -Force (Join-Path $repo 'dist') | Out-Null
-Copy-Item -LiteralPath (Join-Path $variant 'XGuard-v0.9.4-no-root.apk') -Destination (Join-Path $repo 'dist/XGuard-v0.9.4-gkd-validation.apk') -Force
+Copy-Item -LiteralPath (Join-Path $variant 'XGuard-v0.9.5-no-root.apk') -Destination (Join-Path $repo 'dist/XGuard-v0.9.5-gkd-validation.apk') -Force
